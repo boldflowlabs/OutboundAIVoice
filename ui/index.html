@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OutboundAI Voice Dashboard</title>
+<meta name="description" content="AI-powered outbound voice calling platform">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0f;--card:#12121a;--border:#1e1e2e;--accent:#6366f1;--accent2:#8b5cf6;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--text:#e2e8f0;--muted:#64748b;--surface:#1a1a2e}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+a{color:var(--accent);text-decoration:none}
+.app{display:flex;min-height:100vh}
+.sidebar{width:240px;background:var(--card);border-right:1px solid var(--border);padding:20px 0;position:fixed;height:100vh;overflow-y:auto;z-index:10}
+.sidebar .logo{padding:0 20px 24px;font-size:20px;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.sidebar .logo span{font-size:11px;display:block;-webkit-text-fill-color:var(--muted);font-weight:500;margin-top:2px}
+.nav-item{padding:10px 20px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted);transition:.2s;border-left:3px solid transparent}
+.nav-item:hover{background:var(--surface);color:var(--text)}
+.nav-item.active{color:var(--accent);border-left-color:var(--accent);background:rgba(99,102,241,.08)}
+.main{margin-left:240px;flex:1;padding:24px;min-height:100vh}
+.page{display:none}.page.active{display:block}
+h1{font-size:24px;font-weight:700;margin-bottom:20px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
+.stat-card .label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.stat-card .value{font-size:28px;font-weight:700;margin-top:4px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
+.card h2{font-size:16px;font-weight:600;margin-bottom:12px}
+input,select,textarea{width:100%;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:14px;outline:none;transition:.2s}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(99,102,241,.2)}
+textarea{resize:vertical;min-height:80px}
+label{display:block;font-size:13px;font-weight:500;color:var(--muted);margin-bottom:4px}
+.form-group{margin-bottom:14px}
+.btn{padding:10px 20px;border:none;border-radius:8px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;transition:.2s;display:inline-flex;align-items:center;gap:6px}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
+.btn-primary:hover{opacity:.9;transform:translateY(-1px)}
+.btn-danger{background:var(--red);color:#fff}
+.btn-danger:hover{opacity:.9}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px;color:var(--muted);font-weight:500;border-bottom:1px solid var(--border);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td{padding:10px;border-bottom:1px solid var(--border)}
+.badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+.badge-green{background:rgba(34,197,94,.15);color:var(--green)}
+.badge-red{background:rgba(239,68,68,.15);color:var(--red)}
+.badge-yellow{background:rgba(234,179,8,.15);color:var(--yellow)}
+.badge-blue{background:rgba(99,102,241,.15);color:var(--accent)}
+.toast{position:fixed;bottom:24px;right:24px;padding:14px 20px;border-radius:10px;font-size:14px;z-index:999;animation:slideIn .3s;max-width:400px}
+.toast-success{background:var(--green);color:#fff}
+.toast-error{background:var(--red);color:#fff}
+@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.chart-container{position:relative;height:260px}
+.empty{text-align:center;padding:40px;color:var(--muted);font-size:14px}
+.log-entry{padding:8px 12px;border-radius:6px;margin-bottom:4px;font-family:monospace;font-size:12px;word-break:break-all}
+.log-info{background:rgba(99,102,241,.08);border-left:3px solid var(--accent)}
+.log-error{background:rgba(239,68,68,.08);border-left:3px solid var(--red)}
+.log-warning{background:rgba(234,179,8,.08);border-left:3px solid var(--yellow)}
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:768px){.sidebar{display:none}.main{margin-left:0}.row,.settings-grid,.cards{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<nav class="sidebar">
+<div class="logo">OutboundAI<span>Voice Agent Platform</span></div>
+<div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">📊 Dashboard</div>
+<div class="nav-item" data-page="dialer" onclick="showPage('dialer')">📞 Dialer</div>
+<div class="nav-item" data-page="campaigns" onclick="showPage('campaigns')">🚀 Campaigns</div>
+<div class="nav-item" data-page="crm" onclick="showPage('crm')">👥 CRM</div>
+<div class="nav-item" data-page="appointments" onclick="showPage('appointments')">📅 Appointments</div>
+<div class="nav-item" data-page="profiles" onclick="showPage('profiles')">🤖 Agent Profiles</div>
+<div class="nav-item" data-page="prompt" onclick="showPage('prompt')">✏️ Prompt Editor</div>
+<div class="nav-item" data-page="settings" onclick="showPage('settings')">⚙️ Settings</div>
+<div class="nav-item" data-page="logs" onclick="showPage('logs')">📋 Logs</div>
+</nav>
+<div class="main">
+
+<!-- DASHBOARD -->
+<div id="page-dashboard" class="page active">
+<h1>Dashboard</h1>
+<div class="cards" id="stats-cards"></div>
+<div class="row">
+<div class="card"><h2>Calls Over Time</h2><div class="chart-container"><canvas id="timelineChart"></canvas></div></div>
+<div class="card"><h2>Outcome Distribution</h2><div class="chart-container"><canvas id="outcomeChart"></canvas></div></div>
+</div>
+</div>
+
+<!-- DIALER -->
+<div id="page-dialer" class="page">
+<h1>Call Dialer</h1>
+<div class="card" style="max-width:500px">
+<h2>Dispatch a Call</h2>
+<div class="form-group"><label>Phone (E.164)</label><input id="d-phone" placeholder="+919876543210"></div>
+<div class="form-group"><label>Lead Name</label><input id="d-name" placeholder="John Doe" value="there"></div>
+<div class="row">
+<div class="form-group"><label>Business</label><input id="d-biz" value="our company"></div>
+<div class="form-group"><label>Service</label><input id="d-svc" value="our service"></div>
+</div>
+<div class="form-group"><label>Agent Profile</label><select id="d-profile"><option value="">Default</option></select></div>
+<button class="btn btn-primary" onclick="dispatchCall()">📞 Initiate Call</button>
+</div>
+<div class="card"><h2>Recent Calls</h2><table><thead><tr><th>Phone</th><th>Lead</th><th>Outcome</th><th>Duration</th><th>Time</th></tr></thead><tbody id="calls-table"></tbody></table></div>
+</div>
+
+<!-- CAMPAIGNS -->
+<div id="page-campaigns" class="page">
+<h1>Campaigns</h1>
+<div class="card">
+<h2>Create Campaign</h2>
+<div class="form-group"><label>Campaign Name</label><input id="c-name" placeholder="Q4 Outreach"></div>
+<div class="form-group"><label>Contacts (JSON array)</label><textarea id="c-contacts" placeholder='[{"phone":"+919876543210","lead_name":"John"},{"phone":"+919988776655","lead_name":"Jane"}]'></textarea></div>
+<div class="row">
+<div class="form-group"><label>Schedule</label><select id="c-sched"><option value="once">Once (now)</option><option value="daily">Daily</option><option value="weekdays">Weekdays</option></select></div>
+<div class="form-group"><label>Time</label><input id="c-time" type="time" value="09:00"></div>
+</div>
+<div class="row">
+<div class="form-group"><label>Delay (sec)</label><input id="c-delay" type="number" value="3" min="1"></div>
+<div class="form-group"><label>Agent Profile</label><select id="c-profile"><option value="">Default</option></select></div>
+</div>
+<button class="btn btn-primary" onclick="createCampaign()">🚀 Launch Campaign</button>
+</div>
+<div class="card"><h2>All Campaigns</h2><table><thead><tr><th>Name</th><th>Status</th><th>Schedule</th><th>Dispatched</th><th>Failed</th><th>Actions</th></tr></thead><tbody id="campaigns-table"></tbody></table></div>
+</div>
+
+<!-- CRM -->
+<div id="page-crm" class="page">
+<h1>CRM — Contacts</h1>
+<div class="card"><table><thead><tr><th>Phone</th><th>Name</th><th>Calls</th><th>Booked</th><th>Last Outcome</th><th>Last Call</th></tr></thead><tbody id="crm-table"></tbody></table></div>
+</div>
+
+<!-- APPOINTMENTS -->
+<div id="page-appointments" class="page">
+<h1>Appointments</h1>
+<div class="card"><table><thead><tr><th>Name</th><th>Phone</th><th>Date</th><th>Time</th><th>Service</th><th>Status</th><th>Actions</th></tr></thead><tbody id="appt-table"></tbody></table></div>
+</div>
+
+<!-- AGENT PROFILES -->
+<div id="page-profiles" class="page">
+<h1>Agent Profiles</h1>
+<div class="card" style="max-width:600px">
+<h2>Create Profile</h2>
+<div class="form-group"><label>Name</label><input id="p-name" placeholder="Sales Agent"></div>
+<div class="row">
+<div class="form-group"><label>Voice</label><select id="p-voice"><option>anushka</option><option>aravind</option><option>meera</option><option>advika</option></select></div>
+<div class="form-group"><label>Model</label><select id="p-model"><option>gpt-4o-mini</option><option>gpt-4o</option><option>gpt-4.1-mini</option></select></div>
+</div>
+<div class="form-group"><label>System Prompt (optional)</label><textarea id="p-prompt" rows="3"></textarea></div>
+<button class="btn btn-primary" onclick="createProfile()">➕ Create Profile</button>
+</div>
+<div class="card"><h2>All Profiles</h2><table><thead><tr><th>Name</th><th>Voice</th><th>Model</th><th>Default</th><th>Actions</th></tr></thead><tbody id="profiles-table"></tbody></table></div>
+</div>
+
+<!-- PROMPT EDITOR -->
+<div id="page-prompt" class="page">
+<h1>System Prompt Editor</h1>
+<div class="card">
+<div class="form-group"><textarea id="prompt-editor" rows="20" style="font-family:monospace;font-size:13px"></textarea></div>
+<div style="display:flex;gap:8px">
+<button class="btn btn-primary" onclick="savePrompt()">💾 Save Prompt</button>
+<button class="btn btn-outline" onclick="resetPrompt()">↩️ Reset to Default</button>
+</div>
+</div>
+</div>
+
+<!-- SETTINGS -->
+<div id="page-settings" class="page">
+<h1>Settings (BYOK)</h1>
+<div id="settings-container"></div>
+<button class="btn btn-primary" onclick="saveSettings()" style="margin-top:12px">💾 Save All Settings</button>
+</div>
+
+<!-- LOGS -->
+<div id="page-logs" class="page">
+<h1>System Logs</h1>
+<div style="margin-bottom:12px;display:flex;gap:8px">
+<button class="btn btn-sm btn-outline" onclick="loadLogs()">🔄 Refresh</button>
+<button class="btn btn-sm btn-danger" onclick="clearLogs()">🗑️ Clear All</button>
+</div>
+<div class="card" id="logs-container"><div class="empty">Loading...</div></div>
+</div>
+
+</div>
+</div>
+
+<script>
+const API='';
+let statsCharts={};
+
+function showPage(p){
+document.querySelectorAll('.page').forEach(el=>el.classList.remove('active'));
+document.querySelectorAll('.nav-item').forEach(el=>el.classList.remove('active'));
+document.getElementById('page-'+p).classList.add('active');
+document.querySelector(`.nav-item[data-page="${p}"]`).classList.add('active');
+const loaders={dashboard:loadStats,dialer:()=>{loadCalls();loadProfileSelect()},campaigns:()=>{loadCampaigns();loadProfileSelect()},crm:loadCRM,appointments:loadAppointments,profiles:loadProfiles,prompt:loadPrompt,settings:loadSettings,logs:loadLogs};
+if(loaders[p])loaders[p]();
+}
+
+function toast(msg,type='success'){
+const t=document.createElement('div');t.className='toast toast-'+type;t.textContent=msg;
+document.body.appendChild(t);setTimeout(()=>t.remove(),3000);
+}
+
+async function api(path,opts={}){
+try{const r=await fetch(API+path,{headers:{'Content-Type':'application/json'},...opts});
+const d=await r.json();if(!r.ok)throw new Error(d.detail||d.error||JSON.stringify(d));return d;}
+catch(e){toast(e.message,'error');throw e;}
+}
+
+// STATS
+async function loadStats(){
+const s=await api('/api/stats');
+document.getElementById('stats-cards').innerHTML=`
+<div class="stat-card"><div class="label">Total Calls</div><div class="value">${s.total_calls}</div></div>
+<div class="stat-card"><div class="label">Booked</div><div class="value" style="color:var(--green)">${s.booked}</div></div>
+<div class="stat-card"><div class="label">Booking Rate</div><div class="value" style="color:var(--accent)">${s.booking_rate_percent}%</div></div>
+<div class="stat-card"><div class="label">Avg Duration</div><div class="value">${Math.round(s.avg_duration_seconds)}s</div></div>`;
+// Timeline chart
+if(statsCharts.timeline)statsCharts.timeline.destroy();
+const tl=s.timeline||[];
+statsCharts.timeline=new Chart(document.getElementById('timelineChart'),{type:'line',data:{labels:tl.map(t=>t.date.slice(5)),datasets:[{label:'Calls',data:tl.map(t=>t.count),borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,.1)',fill:true,tension:.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:'#64748b'},grid:{color:'#1e1e2e'}},y:{ticks:{color:'#64748b'},grid:{color:'#1e1e2e'}}}}});
+// Outcome chart
+if(statsCharts.outcome)statsCharts.outcome.destroy();
+const oc=s.outcomes||{};const olabels=Object.keys(oc);const ocolors=['#22c55e','#ef4444','#eab308','#6366f1','#8b5cf6','#ec4899'];
+statsCharts.outcome=new Chart(document.getElementById('outcomeChart'),{type:'doughnut',data:{labels:olabels,datasets:[{data:olabels.map(k=>oc[k]),backgroundColor:ocolors.slice(0,olabels.length)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#e2e8f0'}}}}});
+}
+
+// DIALER
+async function dispatchCall(){
+const phone=document.getElementById('d-phone').value.trim();
+if(!phone){toast('Enter phone number','error');return;}
+await api('/api/call',{method:'POST',body:JSON.stringify({phone,lead_name:document.getElementById('d-name').value,business_name:document.getElementById('d-biz').value,service_type:document.getElementById('d-svc').value,agent_profile_id:document.getElementById('d-profile').value||null})});
+toast('Call dispatched to '+phone);document.getElementById('d-phone').value='';loadCalls();
+}
+async function loadCalls(){
+const d=await api('/api/calls?limit=20');const tb=document.getElementById('calls-table');
+tb.innerHTML=d.length?d.map(c=>`<tr><td>${c.phone_number}</td><td>${c.lead_name||'-'}</td><td><span class="badge ${c.outcome==='booked'?'badge-green':c.outcome==='not_interested'?'badge-red':'badge-yellow'}">${c.outcome||'-'}</span></td><td>${c.duration_seconds||0}s</td><td>${(c.timestamp||'').slice(0,16)}</td></tr>`).join(''):'<tr><td colspan="5" class="empty">No calls yet</td></tr>';
+}
+
+// CAMPAIGNS
+async function createCampaign(){
+const name=document.getElementById('c-name').value.trim();
+let contacts;try{contacts=JSON.parse(document.getElementById('c-contacts').value);}catch{toast('Invalid JSON','error');return;}
+await api('/api/campaigns',{method:'POST',body:JSON.stringify({name,contacts,schedule_type:document.getElementById('c-sched').value,schedule_time:document.getElementById('c-time').value,call_delay_seconds:parseInt(document.getElementById('c-delay').value)||3,agent_profile_id:document.getElementById('c-profile').value||null})});
+toast('Campaign created!');document.getElementById('c-name').value='';document.getElementById('c-contacts').value='';loadCampaigns();
+}
+async function loadCampaigns(){
+const d=await api('/api/campaigns');const tb=document.getElementById('campaigns-table');
+tb.innerHTML=d.length?d.map(c=>`<tr><td>${c.name}</td><td><span class="badge ${c.status==='active'?'badge-green':c.status==='completed'?'badge-blue':'badge-yellow'}">${c.status}</span></td><td>${c.schedule_type} @ ${c.schedule_time||''}</td><td>${c.total_dispatched||0}</td><td>${c.total_failed||0}</td><td><button class="btn btn-sm btn-outline" onclick="runCampaign('${c.id}')">▶ Run</button> <button class="btn btn-sm btn-danger" onclick="deleteCampaign('${c.id}')">🗑</button></td></tr>`).join(''):'<tr><td colspan="6" class="empty">No campaigns</td></tr>';
+}
+async function runCampaign(id){await api('/api/campaigns/'+id+'/run',{method:'POST'});toast('Campaign dispatching...');loadCampaigns();}
+async function deleteCampaign(id){await api('/api/campaigns/'+id,{method:'DELETE'});toast('Deleted');loadCampaigns();}
+
+// CRM
+async function loadCRM(){
+const d=await api('/api/crm');const rows=d.data||[];const tb=document.getElementById('crm-table');
+tb.innerHTML=rows.length?rows.map(c=>`<tr><td>${c.phone_number}</td><td>${c.lead_name||'-'}</td><td>${c.total_calls}</td><td>${c.booked}</td><td><span class="badge ${c.last_outcome==='booked'?'badge-green':'badge-yellow'}">${c.last_outcome||'-'}</span></td><td>${(c.last_call||'').slice(0,16)}</td></tr>`).join(''):'<tr><td colspan="6" class="empty">No contacts yet</td></tr>';
+}
+
+// APPOINTMENTS
+async function loadAppointments(){
+const d=await api('/api/appointments');const tb=document.getElementById('appt-table');
+tb.innerHTML=d.length?d.map(a=>`<tr><td>${a.name}</td><td>${a.phone}</td><td>${a.date}</td><td>${a.time}</td><td>${a.service}</td><td><span class="badge ${a.status==='booked'?'badge-green':'badge-red'}">${a.status}</span></td><td>${a.status==='booked'?`<button class="btn btn-sm btn-danger" onclick="cancelAppt('${a.id}')">Cancel</button>`:''}</td></tr>`).join(''):'<tr><td colspan="7" class="empty">No appointments</td></tr>';
+}
+async function cancelAppt(id){await api('/api/appointments/'+id,{method:'DELETE'});toast('Cancelled');loadAppointments();}
+
+// PROFILES
+async function loadProfiles(){
+const d=await api('/api/agent-profiles');const tb=document.getElementById('profiles-table');
+tb.innerHTML=d.length?d.map(p=>`<tr><td>${p.name}</td><td>${p.voice}</td><td>${p.model}</td><td>${p.is_default?'⭐':''}</td><td><button class="btn btn-sm btn-outline" onclick="setDefaultProfile('${p.id}')">Set Default</button> <button class="btn btn-sm btn-danger" onclick="deleteProfile('${p.id}')">🗑</button></td></tr>`).join(''):'<tr><td colspan="5" class="empty">No profiles</td></tr>';
+}
+async function createProfile(){
+const name=document.getElementById('p-name').value.trim();if(!name){toast('Name required','error');return;}
+await api('/api/agent-profiles',{method:'POST',body:JSON.stringify({name,voice:document.getElementById('p-voice').value,model:document.getElementById('p-model').value,system_prompt:document.getElementById('p-prompt').value||null})});
+toast('Profile created');document.getElementById('p-name').value='';loadProfiles();
+}
+async function deleteProfile(id){await api('/api/agent-profiles/'+id,{method:'DELETE'});toast('Deleted');loadProfiles();}
+async function setDefaultProfile(id){await api('/api/agent-profiles/'+id+'/set-default',{method:'POST'});toast('Default set');loadProfiles();}
+async function loadProfileSelect(){
+try{const d=await api('/api/agent-profiles');
+['d-profile','c-profile'].forEach(sid=>{const sel=document.getElementById(sid);if(!sel)return;const v=sel.value;sel.innerHTML='<option value="">Default</option>'+d.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');sel.value=v;});}catch{}
+}
+
+// PROMPT
+async function loadPrompt(){const d=await api('/api/prompt');document.getElementById('prompt-editor').value=d.prompt;}
+async function savePrompt(){await api('/api/prompt',{method:'POST',body:JSON.stringify({prompt:document.getElementById('prompt-editor').value})});toast('Prompt saved');}
+async function resetPrompt(){await api('/api/prompt',{method:'DELETE'});toast('Reset to default');loadPrompt();}
+
+// SETTINGS
+const SETTING_GROUPS={
+'LiveKit':['LIVEKIT_URL','LIVEKIT_API_KEY','LIVEKIT_API_SECRET'],
+'OpenAI':['OPENAI_API_KEY','OPENAI_MODEL'],
+'Sarvam.ai':['SARVAM_API_KEY','SARVAM_STT_MODEL','SARVAM_TTS_MODEL','SARVAM_TTS_SPEAKER','SARVAM_LANGUAGE'],
+'Vobiz SIP':['VOBIZ_SIP_DOMAIN','VOBIZ_USERNAME','VOBIZ_PASSWORD','VOBIZ_OUTBOUND_NUMBER','OUTBOUND_TRUNK_ID','DEFAULT_TRANSFER_NUMBER'],
+'Twilio SMS':['TWILIO_ACCOUNT_SID','TWILIO_AUTH_TOKEN','TWILIO_FROM_NUMBER'],
+'S3 Storage':['S3_ACCESS_KEY_ID','S3_SECRET_ACCESS_KEY','S3_ENDPOINT_URL','S3_REGION','S3_BUCKET'],
+'Cal.com':['CALCOM_API_KEY','CALCOM_EVENT_TYPE_ID','CALCOM_TIMEZONE']
+};
+async function loadSettings(){
+const d=await api('/api/settings');const container=document.getElementById('settings-container');
+let html='';
+for(const[group,keys]of Object.entries(SETTING_GROUPS)){
+html+=`<div class="card"><h2>${group}</h2><div class="settings-grid">`;
+for(const k of keys){const info=d[k]||{};const val=info.value||'';const configured=info.configured;
+const type=k.includes('KEY')||k.includes('SECRET')||k.includes('PASSWORD')||k.includes('TOKEN')?'password':'text';
+html+=`<div class="form-group"><label>${k} ${configured?'<span style="color:var(--green)">✓</span>':''}</label><input class="setting-input" data-key="${k}" type="${type}" value="${val}" placeholder="${configured&&!val?'(configured via env)':''}"></div>`;}
+html+='</div></div>';}
+container.innerHTML=html;
+}
+async function saveSettings(){
+const inputs=document.querySelectorAll('.setting-input');const settings={};
+inputs.forEach(i=>{if(i.value.trim())settings[i.dataset.key]=i.value.trim();});
+if(!Object.keys(settings).length){toast('Nothing to save','error');return;}
+await api('/api/settings',{method:'POST',body:JSON.stringify({settings})});toast('Settings saved ('+Object.keys(settings).length+' keys)');
+}
+
+// LOGS
+async function loadLogs(){
+const d=await api('/api/logs?limit=100');const c=document.getElementById('logs-container');
+c.innerHTML=d.length?d.map(l=>`<div class="log-entry log-${l.level||'info'}"><strong>[${(l.timestamp||'').slice(11,19)}] ${l.source}:</strong> ${l.message}${l.detail?' — '+l.detail:''}</div>`).join(''):'<div class="empty">No logs</div>';
+}
+async function clearLogs(){await api('/api/logs',{method:'DELETE'});toast('Logs cleared');loadLogs();}
+
+// INIT
+loadStats();
+</script>
+</body>
+</html>

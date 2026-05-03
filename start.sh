@@ -15,8 +15,8 @@ echo "   OpenAI Model: ${OPENAI_MODEL:-gpt-4o-mini}"
 echo "   Sarvam TTS: ${SARVAM_TTS_SPEAKER:-anushka}"
 echo "   Supabase: ${SUPABASE_URL}"
 
-echo "🌐 Starting FastAPI server on port 8000..."
-uvicorn server:app --host 0.0.0.0 --port 8000 &
+echo "🌐 Starting FastAPI server on port 80..."
+uvicorn server:app --host 0.0.0.0 --port 80 &
 SERVER_PID=$!
 
 sleep 2

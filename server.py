@@ -50,6 +50,12 @@ except ImportError:
 app = FastAPI(title="OutboundAI Dashboard", version="1.0.0")
 
 
+@app.get("/health", tags=["System"])
+async def health():
+    """Health check endpoint for container orchestration (Coolify, Docker, etc.)."""
+    return {"status": "ok"}
+
+
 @app.on_event("startup")
 async def _startup():
     if _scheduler:

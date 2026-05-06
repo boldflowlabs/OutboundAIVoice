@@ -1,6 +1,8 @@
+import array
 import asyncio
 import json
 import logging
+import math
 import os
 import ssl
 import certifi
@@ -76,15 +78,24 @@ def load_db_settings_to_env():
         logger.warning("Could not load settings from Supabase: %s", exc)
 
 
-def _build_session(tools: list, system_prompt: str) -> AgentSession:
+def _build_session(
+    tools: list,
+    system_prompt: str,
+    vad_instance=None,
+    voice_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+) -> AgentSession:
     """Build AgentSession with OpenAI LLM + Sarvam STT/TTS pipeline."""
-    openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    openai_model = model_override or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     sarvam_stt_model = os.getenv("SARVAM_STT_MODEL", "saaras:v3")
     sarvam_tts_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
     sarvam_speaker = os.getenv("SARVAM_TTS_SPEAKER", "anushka")
     sarvam_language = os.getenv("SARVAM_LANGUAGE", "en-IN")
 
-    logger.info("SESSION MODE: Pipeline (Sarvam STT + OpenAI %s + Sarvam TTS voice=%s)", openai_model, sarvam_speaker)
+    # Use per-call override directly — avoids mutating global os.environ
+    effective_speaker = voice_override or sarvam_speaker
+
+    logger.info("SESSION MODE: Pipeline (Sarvam STT + OpenAI %s + Sarvam TTS voice=%s)", openai_model, effective_speaker)
 
     if _openai_llm is None:
         raise RuntimeError("livekit-plugins-openai not installed. Run: pip install livekit-plugins-openai")
@@ -99,19 +110,133 @@ def _build_session(tools: list, system_prompt: str) -> AgentSession:
 
     tts_instance = None
     if _sarvam_tts:
-        tts_instance = _sarvam_tts(model=sarvam_tts_model, speaker=sarvam_speaker, target_language_code=sarvam_language)
+        tts_instance = _sarvam_tts(model=sarvam_tts_model, speaker=effective_speaker, target_language_code=sarvam_language)
     else:
         logger.warning("Sarvam TTS not available — no TTS configured")
 
+    # Tuned VAD — use pre-warmed instance or load with fast settings as fallback
+    if vad_instance:
+        vad = vad_instance
+    else:
+        vad = silero.VAD.load(
+            min_silence_duration=0.4,
+            activation_threshold=0.5,
+            min_speech_duration=0.05,
+            max_buffered_speech=45.0,
+        )
+
     return AgentSession(
         stt=stt_instance, llm=llm_instance, tts=tts_instance,
-        vad=silero.VAD.load(), tools=tools,
+        vad=vad, tools=tools,
+        # Reduce perceived latency:
+        #   min_endpointing_delay — wait at least this long after speech before sending to LLM
+        #   allow_interruptions    — let the lead cut off the AI mid-sentence
+        min_endpointing_delay=0.4,
+        allow_interruptions=True,
     )
+
+
+async def _play_hold_tone(ctx: agents.JobContext, duration_s: float = 2.0) -> None:
+    """Publish a soft dual-tone hold signal into the LiveKit room immediately on pickup.
+
+    Generates a 440Hz + 480Hz sine blend (classic telephone "please hold" tone)
+    as raw 16-bit PCM and publishes it via a LiveKit LocalAudioTrack.  The track
+    is unpublished automatically once the tone finishes.
+
+    This runs concurrently with session.start() so the lead never hears dead silence
+    while the AI pipeline initialises.
+    """
+    SAMPLE_RATE = 8000   # 8 kHz — matches telephony
+    CHANNELS    = 1
+    FRAME_MS    = 20     # 20 ms frames — standard VoIP packet size
+
+    samples_per_frame = SAMPLE_RATE * FRAME_MS // 1000
+    total_samples = int(SAMPLE_RATE * duration_s)
+
+    source = rtc.AudioSource(sample_rate=SAMPLE_RATE, num_channels=CHANNELS)
+    track  = rtc.LocalAudioTrack.create_audio_track("hold-tone", source)
+
+    try:
+        pub_opts = rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
+        publication = await ctx.room.local_participant.publish_track(track, pub_opts)
+        logger.info("🎵 Hold tone started")
+
+        samples_sent = 0
+        while samples_sent < total_samples:
+            chunk = min(samples_per_frame, total_samples - samples_sent)
+            buf = array.array("h")  # signed 16-bit integers
+            for i in range(chunk):
+                t = (samples_sent + i) / SAMPLE_RATE
+                # Blend two sine waves at -12 dBFS to stay soft and non-intrusive
+                val = (math.sin(2 * math.pi * 440 * t) +
+                       math.sin(2 * math.pi * 480 * t)) * 0.25
+                buf.append(int(val * 32767))
+            frame = rtc.AudioFrame(
+                data=buf.tobytes(),
+                sample_rate=SAMPLE_RATE,
+                num_channels=CHANNELS,
+                samples_per_channel=chunk,
+            )
+            await source.capture_frame(frame)
+            samples_sent += chunk
+
+        logger.info("🎵 Hold tone finished")
+    except Exception as exc:
+        logger.warning("Hold tone failed (non-fatal): %s", exc)
+    finally:
+        try:
+            await ctx.room.local_participant.unpublish_track(publication.sid)
+        except Exception:
+            pass
 
 
 class OutboundAssistant(Agent):
     def __init__(self, instructions: str) -> None:
         super().__init__(instructions=instructions)
+
+
+async def prewarm(proc: agents.JobProcess) -> None:
+    """Pre-warm expensive resources once per worker process.
+
+    Called by LiveKit before the worker accepts its first job.
+    Stored values in proc.userdata are reused across all jobs in this worker.
+
+    Warms up:
+    - Silero VAD  : eliminates 8–15s ONNX model load on first call
+    - Sarvam TTS  : fires a dummy synthesis so the first real utterance isn't cold
+    """
+    # Tuned for lower latency:
+    #   min_silence_duration  — how quickly silence triggers end-of-speech (default 600ms → 400ms)
+    #   activation_threshold  — confidence needed to start speech (lower = faster)
+    #   min_speech_duration   — minimum speech length before VAD fires (default 250ms → 50ms)
+    #   max_buffered_speech   — cap buffered audio to reduce processing lag
+    proc.userdata["vad"] = silero.VAD.load(
+        min_silence_duration=0.4,
+        activation_threshold=0.5,
+        min_speech_duration=0.05,
+        max_buffered_speech=45.0,
+    )
+    logger.info("✅ Silero VAD pre-warmed (low-latency config)")
+
+    # Warm up Sarvam TTS — the first synthesis call is always 1-3s slower because
+    # the plugin needs to establish its HTTP connection pool and JIT-compile codecs.
+    # A no-op synthesis here pays that cost before any real call.
+    if _sarvam_tts:
+        try:
+            sarvam_tts_model  = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+            sarvam_speaker    = os.getenv("SARVAM_TTS_SPEAKER", "anushka")
+            sarvam_language   = os.getenv("SARVAM_LANGUAGE", "en-IN")
+            _warmup_tts = _sarvam_tts(
+                model=sarvam_tts_model,
+                speaker=sarvam_speaker,
+                target_language_code=sarvam_language,
+            )
+            # Synthesize a single space — minimal tokens, just wakes the connection
+            async for _ in _warmup_tts.synthesize(" "):
+                break
+            logger.info("✅ Sarvam TTS pre-warmed")
+        except Exception as exc:
+            logger.warning("Sarvam TTS warmup failed (non-fatal): %s", exc)
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
@@ -156,10 +281,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                                   service_type=service_type, custom_prompt=custom_prompt)
     tool_ctx = AppointmentTools(ctx, phone_number, lead_name)
 
-    if voice_override:
-        os.environ["SARVAM_TTS_SPEAKER"] = voice_override
-    if model_override:
-        os.environ["OPENAI_MODEL"] = model_override
+    # NOTE: voice_override and model_override are passed directly into _build_session
+    # instead of mutating os.environ, which would cause voice/model bleed between
+    # concurrent calls running in the same worker process.
 
     if tools_override:
         try:
@@ -197,10 +321,22 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             return
         await _log("info", f"Call ANSWERED — {phone_number} picked up")
 
+        # ── Hold tone — play immediately so lead hears something while session builds ──
+        # Fires as a background task so session.start() runs concurrently.
+        # By the time the 2s tone finishes, the AI is almost certainly ready.
+        asyncio.create_task(_play_hold_tone(ctx))
+
     # ── Build and start AI session ───────────────────────────────────────────
     active_tools = tool_ctx.build_tool_list(enabled_tools)
     await _log("info", f"Tools loaded: {[t.__name__ for t in active_tools]}")
-    session = _build_session(tools=active_tools, system_prompt=system_prompt)
+    vad = ctx.proc.userdata.get("vad")  # use pre-warmed VAD; fallback handled inside _build_session
+    session = _build_session(
+        tools=active_tools,
+        system_prompt=system_prompt,
+        vad_instance=vad,
+        voice_override=voice_override,
+        model_override=model_override,
+    )
 
     await session.start(
         room=ctx.room,
@@ -279,5 +415,9 @@ if __name__ == "__main__":
     init_db()
     load_db_settings_to_env()
     agents.cli.run_app(
-        agents.WorkerOptions(entrypoint_fnc=entrypoint, agent_name="outbound-caller")
+        agents.WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            prewarm_fnc=prewarm,      # pre-warms Silero VAD before first call
+            agent_name="outbound-caller",
+        )
     )

@@ -88,3 +88,76 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     created_at TEXT NOT NULL
 );
 ALTER TABLE agent_profiles DISABLE ROW LEVEL SECURITY;
+
+-- ═══════════════════════════════════════════════════════
+-- BoldFlow Multi-Tenancy Schema
+-- Run AFTER the base schema above.
+-- Adds: clients table, client_id FKs, blacklist, RLS.
+-- ═══════════════════════════════════════════════════════
+
+-- 1. Clients table (one row per BoldFlow customer)
+CREATE TABLE IF NOT EXISTS clients (
+    id              uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    auth_user_id    uuid,               -- matches auth.users(id) in Supabase Auth
+    name            text NOT NULL,
+    plan            text NOT NULL DEFAULT 'basic',
+    minutes_included int  NOT NULL DEFAULT 1000,
+    created_at      timestamptz DEFAULT NOW()
+);
+
+-- 2. Add client_id to calls and campaigns for data isolation
+ALTER TABLE call_logs  ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES clients(id);
+ALTER TABLE campaigns  ADD COLUMN IF NOT EXISTS client_id uuid REFERENCES clients(id);
+
+-- 3. Blacklist — numbers the client never wants called
+CREATE TABLE IF NOT EXISTS blacklist (
+    id           uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    client_id    uuid REFERENCES clients(id),
+    phone_number text NOT NULL,
+    reason       text,
+    added_at     timestamptz DEFAULT NOW(),
+    UNIQUE(client_id, phone_number)
+);
+
+-- 4. Indexes for fast per-client queries
+CREATE INDEX IF NOT EXISTS idx_call_logs_client  ON call_logs  (client_id);
+CREATE INDEX IF NOT EXISTS idx_campaigns_client  ON campaigns  (client_id);
+CREATE INDEX IF NOT EXISTS idx_blacklist_client  ON blacklist  (client_id);
+
+-- 5. Row Level Security — clients only see their own data
+--    Enable RLS on the tables we want to lock down.
+ALTER TABLE call_logs  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE campaigns  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE blacklist  ENABLE ROW LEVEL SECURITY;
+
+-- Policy: a logged-in Supabase user sees only rows matching their client record
+CREATE POLICY IF NOT EXISTS "client_isolation_call_logs" ON call_logs
+    USING (
+        client_id = (
+            SELECT id FROM clients
+            WHERE auth_user_id = auth.uid()
+            LIMIT 1
+        )
+    );
+
+CREATE POLICY IF NOT EXISTS "client_isolation_campaigns" ON campaigns
+    USING (
+        client_id = (
+            SELECT id FROM clients
+            WHERE auth_user_id = auth.uid()
+            LIMIT 1
+        )
+    );
+
+CREATE POLICY IF NOT EXISTS "client_isolation_blacklist" ON blacklist
+    USING (
+        client_id = (
+            SELECT id FROM clients
+            WHERE auth_user_id = auth.uid()
+            LIMIT 1
+        )
+    );
+
+-- 6. Service-role bypass — server.py uses SUPABASE_SERVICE_KEY which skips RLS.
+--    The React frontend uses the anon key and is therefore correctly filtered.
+

@@ -99,7 +99,7 @@ class CallRequest(BaseModel):
 
 class AgentProfileRequest(BaseModel):
     name: str
-    voice: str = "anushka"
+    voice: str = "kavya"
     model: str = "gpt-4o-mini"
     system_prompt: Optional[str] = None
     enabled_tools: str = "[]"
@@ -134,12 +134,9 @@ class StatusRequest(BaseModel):
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-async def serve_dashboard():
-    html_path = Path(__file__).parent / "ui" / "index.html"
-    if html_path.exists():
-        return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>Dashboard not found — place index.html in ui/</h1>", status_code=404)
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "OutboundAI Voice Agent"}
 
 
 # ── Call dispatch ─────────────────────────────────────────────────────────────

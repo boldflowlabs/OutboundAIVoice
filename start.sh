@@ -12,7 +12,7 @@ fi
 echo "📋 Configuration:"
 echo "   LiveKit: ${LIVEKIT_URL}"
 echo "   OpenAI Model: ${OPENAI_MODEL:-gpt-4o-mini}"
-echo "   Sarvam TTS: ${SARVAM_TTS_SPEAKER:-shreya}"
+echo "   Sarvam TTS: ${SARVAM_TTS_SPEAKER:-kavya}"
 echo "   Supabase: ${SUPABASE_URL}"
 
 echo "🌐 Starting FastAPI server on port 80..."

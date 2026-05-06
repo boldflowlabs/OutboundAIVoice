@@ -89,7 +89,7 @@ def _build_session(
     openai_model = model_override or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     sarvam_stt_model = os.getenv("SARVAM_STT_MODEL", "saaras:v3")
     sarvam_tts_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
-    sarvam_speaker = os.getenv("SARVAM_TTS_SPEAKER", "anushka")
+    sarvam_speaker = os.getenv("SARVAM_TTS_SPEAKER", "kavya")
     sarvam_language = os.getenv("SARVAM_LANGUAGE", "en-IN")
 
     # Use per-call override directly — avoids mutating global os.environ
@@ -217,7 +217,7 @@ def prewarm(proc: agents.JobProcess) -> None:
         async def _warm_tts():
             try:
                 sarvam_tts_model  = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
-                sarvam_speaker    = os.getenv("SARVAM_TTS_SPEAKER", "anushka")
+                sarvam_speaker    = os.getenv("SARVAM_TTS_SPEAKER", "kavya")
                 sarvam_language   = os.getenv("SARVAM_LANGUAGE", "en-IN")
                 _warmup_tts = _sarvam_tts(
                     model=sarvam_tts_model,

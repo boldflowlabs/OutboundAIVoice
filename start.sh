@@ -22,6 +22,9 @@ SERVER_PID=$!
 sleep 2
 
 echo "🤖 Starting LiveKit agent worker..."
-python agent.py start
+while true; do
+    python agent.py start || echo "Agent crashed. Make sure LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET are set in Coolify Environment Variables!"
+    sleep 10
+done
 
 kill $SERVER_PID 2>/dev/null || true

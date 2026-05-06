@@ -5,3 +5,17 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+    networks:
+      - app-network
+
+  dashboard:
+    build: ./boldflow-dashboard
+    restart: unless-stopped
+    depends_on:
+      - outboundai
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

@@ -205,11 +205,6 @@ def prewarm(proc: agents.JobProcess) -> None:
     - Silero VAD  : eliminates 8–15s ONNX model load on first call
     - Sarvam TTS  : fires a dummy synthesis so the first real utterance isn't cold
     """
-    # Tuned for lower latency:
-    #   min_silence_duration  — how quickly silence triggers end-of-speech (default 600ms → 400ms)
-    #   activation_threshold  — confidence needed to start speech (lower = faster)
-    #   min_speech_duration   — minimum speech length before VAD fires (default 250ms → 50ms)
-    #   max_buffered_speech   — cap buffered audio to reduce processing lag
     proc.userdata["vad"] = silero.VAD.load(
         min_silence_duration=0.4,
         activation_threshold=0.5,
@@ -218,25 +213,28 @@ def prewarm(proc: agents.JobProcess) -> None:
     )
     logger.info("✅ Silero VAD pre-warmed (low-latency config)")
 
-    # Warm up Sarvam TTS — the first synthesis call is always 1-3s slower because
-    # the plugin needs to establish its HTTP connection pool and JIT-compile codecs.
-    # A no-op synthesis here pays that cost before any real call.
     if _sarvam_tts:
+        async def _warm_tts():
+            try:
+                sarvam_tts_model  = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
+                sarvam_speaker    = os.getenv("SARVAM_TTS_SPEAKER", "anushka")
+                sarvam_language   = os.getenv("SARVAM_LANGUAGE", "en-IN")
+                _warmup_tts = _sarvam_tts(
+                    model=sarvam_tts_model,
+                    speaker=sarvam_speaker,
+                    target_language_code=sarvam_language,
+                )
+                async for _ in _warmup_tts.synthesize(" "):
+                    break
+                logger.info("✅ Sarvam TTS pre-warmed")
+            except Exception as exc:
+                logger.warning("Sarvam TTS warmup failed (non-fatal): %s", exc)
+        
         try:
-            sarvam_tts_model  = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
-            sarvam_speaker    = os.getenv("SARVAM_TTS_SPEAKER", "anushka")
-            sarvam_language   = os.getenv("SARVAM_LANGUAGE", "en-IN")
-            _warmup_tts = _sarvam_tts(
-                model=sarvam_tts_model,
-                speaker=sarvam_speaker,
-                target_language_code=sarvam_language,
-            )
-            # Synthesize a single space — minimal tokens, just wakes the connection
-            async for _ in _warmup_tts.synthesize(" "):
-                break
-            logger.info("✅ Sarvam TTS pre-warmed")
-        except Exception as exc:
-            logger.warning("Sarvam TTS warmup failed (non-fatal): %s", exc)
+            loop = asyncio.get_running_loop()
+            loop.create_task(_warm_tts())
+        except RuntimeError:
+            asyncio.run(_warm_tts())
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:

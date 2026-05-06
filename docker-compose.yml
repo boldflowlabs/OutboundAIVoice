@@ -2,8 +2,6 @@ version: "3.8"
 services:
   outboundai:
     build: .
-    ports:
-      - "8000:80"
     env_file:
       - .env
     restart: unless-stopped

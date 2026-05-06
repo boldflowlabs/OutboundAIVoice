@@ -195,7 +195,7 @@ class OutboundAssistant(Agent):
         super().__init__(instructions=instructions)
 
 
-async def prewarm(proc: agents.JobProcess) -> None:
+def prewarm(proc: agents.JobProcess) -> None:
     """Pre-warm expensive resources once per worker process.
 
     Called by LiveKit before the worker accepts its first job.

@@ -24,7 +24,7 @@ async def _log(msg, detail="", level="info"):
 
 
 class AppointmentTools(llm.ToolContext):
-    """All 9 function tools for the appointment-booking agent."""
+    """All function tools for the appointment-booking agent."""
 
     def __init__(self, ctx: agents.JobContext, phone_number=None, lead_name=None):
         self.ctx = ctx
@@ -71,7 +71,10 @@ class AppointmentTools(llm.ToolContext):
         """End call and log outcome. outcome: booked|not_interested|wrong_number|voicemail|no_answer|callback_requested"""
         duration = int(time.time() - self._call_start_time)
         try:
-            await log_call(self.phone_number or "unknown", self.lead_name, outcome, reason, duration, self.recording_url)
+            await log_call(
+                self.phone_number or "unknown", self.lead_name,
+                outcome, reason, duration, self.recording_url,
+            )
         except Exception as exc:
             logger.error("Failed to log call: %s", exc)
         try:
@@ -119,9 +122,11 @@ class AppointmentTools(llm.ToolContext):
             return "SMS skipped: Twilio not configured."
         try:
             from twilio.rest import Client
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             client = Client(sid, token)
-            await loop.run_in_executor(None, lambda: client.messages.create(body=message, from_=from_num, to=phone))
+            await loop.run_in_executor(
+                None, lambda: client.messages.create(body=message, from_=from_num, to=phone)
+            )
             return f"SMS sent to {phone}."
         except Exception:
             return "SMS delivery failed, but booking is confirmed."
@@ -176,14 +181,15 @@ class AppointmentTools(llm.ToolContext):
             api_key = os.getenv("OPENAI_API_KEY", "")
             if not api_key:
                 return
-            from openai import OpenAI
-            client = OpenAI(api_key=api_key)
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
             bullet_list = "\n".join(f"- {m['insight']}" for m in memories)
             prompt = f"Compress these notes about a sales contact into 3-5 concise bullets. Keep all key facts.\n\n{bullet_list}"
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, lambda: client.chat.completions.create(
-                model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}], max_tokens=300
-            ))
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+            )
             text = response.choices[0].message.content.strip()
             if text:
                 await compress_contact_memory(self.phone_number, text)
@@ -207,9 +213,12 @@ class AppointmentTools(llm.ToolContext):
                 resp = await client.post(
                     "https://api.cal.com/v1/bookings",
                     headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json={"eventTypeId": int(event_type_id), "start": start_iso, "timeZone": timezone,
-                          "responses": {"name": name, "email": email, "notes": notes},
-                          "metadata": {"source": "OutboundAI"}, "language": "en"},
+                    json={
+                        "eventTypeId": int(event_type_id), "start": start_iso,
+                        "timeZone": timezone,
+                        "responses": {"name": name, "email": email, "notes": notes},
+                        "metadata": {"source": "OutboundAI"}, "language": "en",
+                    },
                 )
             data = resp.json()
             if resp.status_code not in (200, 201):

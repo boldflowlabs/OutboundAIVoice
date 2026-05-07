@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment files (secrets — never in image)
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# IDE / OS
+.DS_Store
+*.log
+*.db
+*.sqlite
+.idea/
+.vscode/
+
+# Dev files
+find_trunk.py
+KMS/

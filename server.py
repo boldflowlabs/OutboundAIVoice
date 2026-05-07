@@ -8,19 +8,25 @@ import random
 import ssl
 import certifi
 import aiohttp
-from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+# ── Patch SSL to use certifi's CA bundle ─────────────────────────────────────
 _orig_ssl = ssl.create_default_context
+
+
 def _certifi_ssl(purpose=ssl.Purpose.SERVER_AUTH, **kwargs):
     if not kwargs.get("cafile") and not kwargs.get("capath") and not kwargs.get("cadata"):
         kwargs["cafile"] = certifi.where()
     return _orig_ssl(purpose, **kwargs)
+
+
 ssl.create_default_context = _certifi_ssl
 
 from db import (
@@ -34,10 +40,11 @@ from db import (
 from prompts import DEFAULT_SYSTEM_PROMPT
 
 load_dotenv(".env", override=False)  # VPS env vars always take priority
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 logger = logging.getLogger("server")
-
-init_db()
 
 try:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -47,17 +54,44 @@ except ImportError:
     _scheduler = None
     logger.warning("APScheduler not installed — campaign scheduling disabled")
 
-app = FastAPI(title="OutboundAI Dashboard", version="1.0.0")
 
-from fastapi.middleware.cors import CORSMiddleware
+# ── Lifespan (replaces deprecated @app.on_event) ─────────────────────────────
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Startup and shutdown logic."""
+    init_db()
+    if _scheduler:
+        _scheduler.start()
+        await _reschedule_all_campaigns()
+        logger.info("Scheduler started")
+    yield
+    if _scheduler and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+        logger.info("Scheduler stopped")
+
+
+app = FastAPI(title="OutboundAI Dashboard", version="1.0.0", lifespan=lifespan)
+
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# allow_origins=["*"] is INCOMPATIBLE with allow_credentials=True (CORS spec).
+# Use explicit origins if you need credentials, or keep wildcard without credentials.
+_cors_origins_raw = os.getenv("CORS_ORIGINS", "*")
+_cors_origins = (
+    ["*"] if _cors_origins_raw.strip() == "*"
+    else [o.strip() for o in _cors_origins_raw.split(",") if o.strip()]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=(_cors_origins_raw.strip() != "*"),  # credentials only with explicit origins
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health", tags=["System"])
 async def health():
@@ -65,18 +99,7 @@ async def health():
     return {"status": "ok"}
 
 
-@app.on_event("startup")
-async def _startup():
-    if _scheduler:
-        _scheduler.start()
-        await _reschedule_all_campaigns()
-
-
-@app.on_event("shutdown")
-async def _shutdown():
-    if _scheduler and _scheduler.running:
-        _scheduler.shutdown(wait=False)
-
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def eff(key: str) -> str:
     """VPS env vars are the single source of truth. Falls back to DB settings."""
@@ -84,6 +107,12 @@ async def eff(key: str) -> str:
     if env_val:
         return env_val
     return await get_setting(key, "")
+
+
+def _lk_ssl_ctx() -> ssl.SSLContext:
+    """Return a verified SSL context using certifi's CA bundle."""
+    ctx = ssl.create_default_context()
+    return ctx
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -132,7 +161,7 @@ class StatusRequest(BaseModel):
     status: str
 
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+# ── Root ──────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
@@ -185,10 +214,8 @@ async def api_dispatch_call(req: CallRequest):
 
     try:
         from livekit import api as lk_api
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ctx))
+        ssl_ctx = _lk_ssl_ctx()
+        session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx))
         lk = lk_api.LiveKitAPI(url=url, api_key=key, api_secret=secret, session=session)
         await lk.room.create_room(lk_api.CreateRoomRequest(name=room_name, empty_timeout=300, max_participants=5))
         await lk.agent_dispatch.create_dispatch(
@@ -282,9 +309,9 @@ async def api_save_settings(req: SettingsRequest):
 
 @app.post("/api/setup/trunk")
 async def api_setup_trunk():
-    url    = await eff("LIVEKIT_URL")
-    key    = await eff("LIVEKIT_API_KEY")
-    secret = await eff("LIVEKIT_API_SECRET")
+    url        = await eff("LIVEKIT_URL")
+    key        = await eff("LIVEKIT_API_KEY")
+    secret     = await eff("LIVEKIT_API_SECRET")
     sip_domain = await eff("VOBIZ_SIP_DOMAIN")
     username   = await eff("VOBIZ_USERNAME")
     password   = await eff("VOBIZ_PASSWORD")
@@ -295,10 +322,8 @@ async def api_setup_trunk():
 
     try:
         from livekit import api as lk_api
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ctx))
+        ssl_ctx = _lk_ssl_ctx()
+        session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx))
         lk = lk_api.LiveKitAPI(url=url, api_key=key, api_secret=secret, session=session)
         trunk = await lk.sip.create_sip_outbound_trunk(
             lk_api.CreateSIPOutboundTrunkRequest(
@@ -421,11 +446,13 @@ async def _dispatch_one(lk, lk_api, contact: dict, room_name: str,
         if profile:
             if not metadata["system_prompt"] and profile.get("system_prompt"):
                 metadata["system_prompt"] = profile["system_prompt"]
-            if profile.get("voice"):   metadata["voice_override"] = profile["voice"]
-            if profile.get("model"):   metadata["model_override"] = profile["model"]
+            if profile.get("voice"):         metadata["voice_override"] = profile["voice"]
+            if profile.get("model"):         metadata["model_override"] = profile["model"]
             if profile.get("enabled_tools"): metadata["tools_override"] = profile["enabled_tools"]
         await lk.agent_dispatch.create_dispatch(
-            lk_api.CreateAgentDispatchRequest(agent_name="outbound-caller", room=room_name, metadata=json.dumps(metadata))
+            lk_api.CreateAgentDispatchRequest(
+                agent_name="outbound-caller", room=room_name, metadata=json.dumps(metadata)
+            )
         )
         return True
     except Exception as exc:
@@ -455,10 +482,8 @@ async def _run_campaign(campaign_id: str) -> None:
         return
 
     from livekit import api as lk_api_module
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ctx))
+    ssl_ctx = _lk_ssl_ctx()
+    session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx))
 
     ok_count = fail_count = 0
     try:

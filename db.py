@@ -1,8 +1,12 @@
 import os
 import uuid
+import json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from collections import defaultdict
+
+logger = logging.getLogger("db")
 
 DEFAULTS = {
     "LIVEKIT_URL":             os.getenv("LIVEKIT_URL", ""),
@@ -30,29 +34,44 @@ def _default(key: str) -> str:
     return os.getenv(key, DEFAULTS.get(key, ""))
 
 
-SUPABASE_URL = _default("SUPABASE_URL")
-SUPABASE_KEY = _default("SUPABASE_SERVICE_KEY")
-
 SENSITIVE_KEYS = {
     "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "OPENAI_API_KEY",
     "SARVAM_API_KEY", "VOBIZ_PASSWORD", "TWILIO_AUTH_TOKEN",
     "SUPABASE_SERVICE_KEY", "S3_SECRET_ACCESS_KEY", "CALCOM_API_KEY",
 }
 
+# ── Supabase client singletons ────────────────────────────────────────────────
+# Creating a new client per call is extremely expensive. Cache them.
+
+_sync_client = None
+_async_client = None
+
 
 def _sdb():
-    from supabase import create_client
-    return create_client(_default("SUPABASE_URL"), _default("SUPABASE_SERVICE_KEY"))
+    """Return a cached synchronous Supabase client."""
+    global _sync_client
+    if _sync_client is None:
+        from supabase import create_client
+        url = _default("SUPABASE_URL")
+        key = _default("SUPABASE_SERVICE_KEY")
+        _sync_client = create_client(url, key)
+    return _sync_client
 
 
 async def _adb():
-    from supabase._async.client import create_client
-    return await create_client(_default("SUPABASE_URL"), _default("SUPABASE_SERVICE_KEY"))
+    """Return a cached asynchronous Supabase client."""
+    global _async_client
+    if _async_client is None:
+        from supabase._async.client import create_client
+        url = _default("SUPABASE_URL")
+        key = _default("SUPABASE_SERVICE_KEY")
+        _async_client = await create_client(url, key)
+    return _async_client
 
 
 def init_db() -> None:
-    url = os.getenv("SUPABASE_URL", SUPABASE_URL)
-    key = os.getenv("SUPABASE_SERVICE_KEY", SUPABASE_KEY)
+    url = _default("SUPABASE_URL")
+    key = _default("SUPABASE_SERVICE_KEY")
     if not url or not key:
         print("⚠️  SUPABASE_URL or SUPABASE_SERVICE_KEY not set.")
         return
@@ -132,7 +151,6 @@ async def get_enabled_tools() -> list:
     if not raw:
         return []
     try:
-        import json
         result = json.loads(raw)
         return result if isinstance(result, list) else []
     except Exception:
@@ -256,7 +274,13 @@ async def log_call(
 async def get_all_calls(page: int = 1, limit: int = 20) -> list:
     db = await _adb()
     offset = (page - 1) * limit
-    result = await db.table("call_logs").select("*").order("timestamp", desc=True).range(offset, offset + limit - 1).execute()
+    result = (
+        await db.table("call_logs")
+        .select("*")
+        .order("timestamp", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
     return result.data or []
 
 
@@ -309,9 +333,13 @@ async def get_stats() -> dict:
     daily: dict = defaultdict(int)
     for r in rows:
         ts = (r.get("timestamp") or "")[:10]
-        if ts: daily[ts] += 1
+        if ts:
+            daily[ts] += 1
     today = datetime.now().date()
-    timeline = [{"date": (today - timedelta(days=i)).isoformat(), "count": daily.get((today - timedelta(days=i)).isoformat(), 0)} for i in range(13, -1, -1)]
+    timeline = [
+        {"date": (today - timedelta(days=i)).isoformat(), "count": daily.get((today - timedelta(days=i)).isoformat(), 0)}
+        for i in range(13, -1, -1)
+    ]
     dur_sum: dict = defaultdict(float)
     dur_cnt: dict = defaultdict(int)
     for r in rows:
@@ -334,12 +362,14 @@ async def create_campaign(name, contacts_json, schedule_type="once", schedule_ti
                            call_delay_seconds=3, system_prompt=None, agent_profile_id=None):
     campaign_id = str(uuid.uuid4())
     db = await _adb()
-    row = {"id": campaign_id, "name": name, "status": "active", "contacts_json": contacts_json,
-           "schedule_type": schedule_type, "schedule_time": schedule_time,
-           "call_delay_seconds": call_delay_seconds, "created_at": datetime.now().isoformat(),
-           "total_dispatched": 0, "total_failed": 0}
-    if system_prompt: row["system_prompt"] = system_prompt
-    if agent_profile_id: row["agent_profile_id"] = agent_profile_id
+    row = {
+        "id": campaign_id, "name": name, "status": "active",
+        "contacts_json": contacts_json, "schedule_type": schedule_type,
+        "schedule_time": schedule_time, "call_delay_seconds": call_delay_seconds,
+        "created_at": datetime.now().isoformat(), "total_dispatched": 0, "total_failed": 0,
+    }
+    if system_prompt:     row["system_prompt"] = system_prompt
+    if agent_profile_id:  row["agent_profile_id"] = agent_profile_id
     await db.table("campaigns").insert(row).execute()
     return campaign_id
 

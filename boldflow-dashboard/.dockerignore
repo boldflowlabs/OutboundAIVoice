@@ -1,0 +1,15 @@
+# Dependencies (never in build context)
+node_modules/
+
+# Build output (gets rebuilt inside Docker)
+dist/
+
+# Environment (use Docker/Coolify env vars)
+.env
+.env.local
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.log

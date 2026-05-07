@@ -23,3 +23,5 @@ services:
       - "3000:80"       # Nginx inside container runs on 80
     depends_on:
       - backend
+    environment:
+      - VITE_API_URL=http://p954ppit4apqpnebe72jb08j.72.62.227.227.sslip.io

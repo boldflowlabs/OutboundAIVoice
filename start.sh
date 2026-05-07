@@ -16,7 +16,7 @@ echo "   Sarvam TTS: ${SARVAM_TTS_SPEAKER:-kavya}"
 echo "   Supabase: ${SUPABASE_URL}"
 
 echo "🌐 Starting FastAPI server on port 80..."
-uvicorn server:app --host 0.0.0.0 --port 80 &
+uvicorn server:app --host 0.0.0.0 --port 8000 &
 SERVER_PID=$!
 
 sleep 2

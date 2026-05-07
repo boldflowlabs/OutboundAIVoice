@@ -1,21 +1,25 @@
-version: "3.8"
+version: "3.9"
+
 services:
-  outboundai:
-    build: .
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: outbound_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
     env_file:
       - .env
-    restart: unless-stopped
-    networks:
-      - app-network
+    command: bash start.sh
 
-  dashboard:
-    build: ./boldflow-dashboard
+  frontend:
+    build:
+      context: ./boldflow-dashboard
+      dockerfile: Dockerfile
+    container_name: outbound_frontend
     restart: unless-stopped
+    ports:
+      - "3000:80"       # Nginx inside container runs on 80
     depends_on:
-      - outboundai
-    networks:
-      - app-network
-
-networks:
-  app-network:
-    driver: bridge
+      - backend

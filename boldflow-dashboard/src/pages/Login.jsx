@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
+import { BRAND_CONFIG } from '../brandConfig'
 
 export default function Login() {
   const [email, setEmail] = useState('')
@@ -42,8 +43,8 @@ export default function Login() {
             borderRadius: 12, display: 'flex', alignItems: 'center',
             justifyContent: 'center', margin: '0 auto 12px',
             fontSize: 22, fontWeight: 800, color: '#fff',
-          }}>B</div>
-          <h1 style={{ fontSize: '1.4rem' }}>BoldFlow AI</h1>
+          }}>{BRAND_CONFIG.logoText}</div>
+          <h1 style={{ fontSize: '1.4rem' }}>{BRAND_CONFIG.name}</h1>
           <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4 }}>
             Sign in to your dashboard
           </p>

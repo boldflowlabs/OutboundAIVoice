@@ -31,24 +31,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("outbound-agent")
 
 # ── Import plugins ───────────────────────────────────────────────────────────
-_openai_llm = None
-_sarvam_stt = None
-_sarvam_tts = None
+_realtime_model = None
 
 try:
-    from livekit.plugins import openai as _oai
-    _openai_llm = _oai.LLM
-    logger.info("Loaded livekit-plugins-openai")
+    from livekit.plugins.google.beta.realtime import RealtimeModel as _rm
+    _realtime_model = _rm
+    logger.info("Loaded livekit-plugins-google beta.realtime.RealtimeModel")
 except ImportError:
-    logger.warning("livekit-plugins-openai not installed")
-
-try:
-    from livekit.plugins import sarvam as _sv
-    _sarvam_stt = _sv.STT
-    _sarvam_tts = _sv.TTS
-    logger.info("Loaded livekit-plugins-sarvam (STT + TTS)")
-except ImportError:
-    logger.warning("livekit-plugins-sarvam not installed")
+    try:
+        from livekit.plugins.google.realtime import RealtimeModel as _rm
+        _realtime_model = _rm
+        logger.info("Loaded livekit-plugins-google realtime.RealtimeModel")
+    except ImportError:
+        logger.warning("livekit-plugins-google not installed")
 
 
 async def _log(level, msg, detail=""):
@@ -78,6 +73,10 @@ def load_db_settings_to_env():
         logger.warning("Could not load settings from Supabase: %s", exc)
 
 
+# NOTE: Gemini Live native-audio models (e.g. gemini-2.0-flash-exp, gemini-2.5-flash)
+# do NOT support session.update_agent() or updating instructions mid-session/mid-call.
+# The campaign/call flow logic here loads the agent persona once at startup and does not
+# perform mid-call instruction/persona switching, making it safe for Gemini Live.
 def _build_session(
     tools: list,
     system_prompt: str,
@@ -85,34 +84,23 @@ def _build_session(
     voice_override: Optional[str] = None,
     model_override: Optional[str] = None,
 ) -> AgentSession:
-    """Build AgentSession with OpenAI LLM + Sarvam STT/TTS pipeline."""
-    openai_model = model_override or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    sarvam_stt_model = os.getenv("SARVAM_STT_MODEL", "saaras:v3")
-    sarvam_tts_model = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
-    sarvam_speaker = os.getenv("SARVAM_TTS_SPEAKER", "kavya")
-    sarvam_language = os.getenv("SARVAM_LANGUAGE", "en-IN")
+    """Build AgentSession with Google Gemini Live RealtimeModel."""
+    gemini_model = model_override or os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+    gemini_voice = voice_override or os.getenv("GEMINI_VOICE", "Aoede")
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
 
-    # Use per-call override directly — avoids mutating global os.environ
-    effective_speaker = voice_override or sarvam_speaker
+    logger.info("SESSION MODE: Google Gemini Live RealtimeModel model=%s voice=%s", gemini_model, gemini_voice)
 
-    logger.info("SESSION MODE: Pipeline (Sarvam STT + OpenAI %s + Sarvam TTS voice=%s)", openai_model, effective_speaker)
+    if _realtime_model is None:
+        raise RuntimeError("livekit-plugins-google not installed. Run: pip install livekit-plugins-google")
 
-    if _openai_llm is None:
-        raise RuntimeError("livekit-plugins-openai not installed. Run: pip install livekit-plugins-openai")
-
-    llm_instance = _openai_llm(model=openai_model)
-
-    stt_instance = None
-    if _sarvam_stt:
-        stt_instance = _sarvam_stt(model=sarvam_stt_model, language=sarvam_language)
-    else:
-        logger.warning("Sarvam STT not available — no STT configured")
-
-    tts_instance = None
-    if _sarvam_tts:
-        tts_instance = _sarvam_tts(model=sarvam_tts_model, speaker=effective_speaker, target_language_code=sarvam_language)
-    else:
-        logger.warning("Sarvam TTS not available — no TTS configured")
+    # Initialize RealtimeModel from livekit-plugins-google
+    llm_instance = _realtime_model(
+        model=gemini_model,
+        voice=gemini_voice,
+        instructions=system_prompt,
+        api_key=api_key
+    )
 
     # Tuned VAD — use pre-warmed instance or load with fast settings as fallback
     if vad_instance:
@@ -125,12 +113,12 @@ def _build_session(
             max_buffered_speech=45.0,
         )
 
+    # Note: Google Gemini Live is a multimodal model, so stt and tts are handled natively
+    # by the RealtimeModel instance passed to the llm argument.
     return AgentSession(
-        stt=stt_instance, llm=llm_instance, tts=tts_instance,
-        vad=vad, tools=tools,
-        # Reduce perceived latency:
-        #   min_endpointing_delay — wait at least this long after speech before sending to LLM
-        #   allow_interruptions    — let the lead cut off the AI mid-sentence
+        llm=llm_instance,
+        vad=vad,
+        tools=tools,
         min_endpointing_delay=0.4,
         allow_interruptions=True,
     )
@@ -203,7 +191,6 @@ def prewarm(proc: agents.JobProcess) -> None:
 
     Warms up:
     - Silero VAD  : eliminates 8–15s ONNX model load on first call
-    - Sarvam TTS  : fires a dummy synthesis so the first real utterance isn't cold
     """
     proc.userdata["vad"] = silero.VAD.load(
         min_silence_duration=0.4,
@@ -212,29 +199,6 @@ def prewarm(proc: agents.JobProcess) -> None:
         max_buffered_speech=45.0,
     )
     logger.info("✅ Silero VAD pre-warmed (low-latency config)")
-
-    if _sarvam_tts:
-        async def _warm_tts():
-            try:
-                sarvam_tts_model  = os.getenv("SARVAM_TTS_MODEL", "bulbul:v3")
-                sarvam_speaker    = os.getenv("SARVAM_TTS_SPEAKER", "kavya")
-                sarvam_language   = os.getenv("SARVAM_LANGUAGE", "en-IN")
-                _warmup_tts = _sarvam_tts(
-                    model=sarvam_tts_model,
-                    speaker=sarvam_speaker,
-                    target_language_code=sarvam_language,
-                )
-                async for _ in _warmup_tts.synthesize(" "):
-                    break
-                logger.info("✅ Sarvam TTS pre-warmed")
-            except Exception as exc:
-                logger.warning("Sarvam TTS warmup failed (non-fatal): %s", exc)
-        
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_warm_tts())
-        except RuntimeError:
-            asyncio.run(_warm_tts())
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
@@ -258,6 +222,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     voice_override: Optional[str] = None
     model_override: Optional[str] = None
     tools_override: Optional[str] = None
+    sip_trunk_id: Optional[str] = None
 
     if ctx.job.metadata:
         try:
@@ -270,6 +235,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             voice_override = data.get("voice_override")
             model_override = data.get("model_override")
             tools_override = data.get("tools_override")
+            sip_trunk_id   = data.get("sip_trunk_id")
         except (json.JSONDecodeError, AttributeError):
             await _log("warning", "Invalid JSON in job metadata")
 
@@ -297,17 +263,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # ── Dial — MUST come before session.start() ──────────────────────────────
     if phone_number:
-        trunk_id = os.getenv("OUTBOUND_TRUNK_ID")
-        if not trunk_id:
-            await _log("error", "OUTBOUND_TRUNK_ID not set — cannot place outbound call")
+        trunk_to_use = sip_trunk_id or os.getenv("OUTBOUND_TRUNK_ID")
+        if not trunk_to_use:
+            await _log("error", "OUTBOUND_TRUNK_ID/sip_trunk_id not set — cannot place outbound call")
             ctx.shutdown()
             return
-        await _log("info", f"Dialing {phone_number} via SIP trunk {trunk_id}")
+        await _log("info", f"Dialing {phone_number} via SIP trunk {trunk_to_use}")
         try:
             await ctx.api.sip.create_sip_participant(
                 api.CreateSIPParticipantRequest(
                     room_name=ctx.room.name,
-                    sip_trunk_id=trunk_id,
+                    sip_trunk_id=trunk_to_use,
                     sip_call_to=phone_number,
                     participant_identity=f"sip_{phone_number}",
                     wait_until_answered=True,

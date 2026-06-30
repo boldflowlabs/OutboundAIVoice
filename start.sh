@@ -1,11 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-echo "🚀 Starting OutboundAI Voice Agent..."
+echo "🚀 Starting BoldFlow AI Voice Agent (Outbound)..."
 echo "📋 Configuration:"
 echo "   LiveKit:       ${LIVEKIT_URL:-NOT SET}"
-echo "   OpenAI Model:  ${OPENAI_MODEL:-gpt-4o-mini}"
-echo "   Sarvam TTS:    ${SARVAM_TTS_SPEAKER:-kavya}"
+echo "   Gemini Model:  ${GEMINI_MODEL:-gemini-2.0-flash-exp}"
+echo "   Gemini Voice:  ${GEMINI_VOICE:-Aoede}"
 echo "   Supabase:      ${SUPABASE_URL:-NOT SET}"
 
 echo "🌐 Starting FastAPI server on port 8000..."
@@ -23,7 +23,7 @@ sleep 3
 echo "🤖 Starting LiveKit agent worker (auto-restart on crash)..."
 while true; do
   python agent.py start \
-    || echo "⚠️  Agent crashed — check LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET. Restarting in 10s..."
+    || echo "⚠️  Agent crashed — check LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, and GEMINI_API_KEY. Restarting in 10s..."
   sleep 10
 done
 

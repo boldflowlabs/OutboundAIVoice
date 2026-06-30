@@ -129,6 +129,7 @@ export default function Campaigns() {
 function SingleCallCard() {
   const [phone, setPhone] = useState('')
   const [name, setName]   = useState('')
+  const [market, setMarket] = useState('')
   const [status, setStatus] = useState(null) // null | 'loading' | 'ok' | 'err'
   const [msg, setMsg]     = useState('')
 
@@ -137,11 +138,16 @@ function SingleCallCard() {
     setStatus('loading')
     setMsg('')
     try {
-      await dispatchCall({ phone_number: phone.trim(), lead_name: name.trim() || 'there' })
+      await dispatchCall({
+        phone_number: phone.trim(),
+        lead_name: name.trim() || 'there',
+        target_market: market || undefined
+      })
       setStatus('ok')
       setMsg('📞 Call dispatched successfully!')
       setPhone('')
       setName('')
+      setMarket('')
     } catch (err) {
       setStatus('err')
       setMsg(err.message || 'Failed to dispatch call')
@@ -172,6 +178,19 @@ function SingleCallCard() {
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && fire()}
         />
+        <select
+          className="select"
+          style={{ flex: '1 1 140px', minWidth: 120 }}
+          value={market}
+          onChange={(e) => setMarket(e.target.value)}
+        >
+          <option value="">Default Trunk</option>
+          <option value="US">USA Market (+1)</option>
+          <option value="GB">UK Market (+44)</option>
+          <option value="CA">Canada Market (+1)</option>
+          <option value="AU">Australia Market (+61)</option>
+          <option value="AE">UAE/Dubai Market (+971)</option>
+        </select>
         <button
           className="btn btn-primary"
           disabled={!phone.trim() || status === 'loading'}
@@ -198,7 +217,7 @@ function CreateCampaignModal({ onClose }) {
   const [step, setStep] = useState(1) // 1: details, 2: CSV, 3: review
   const [form, setForm] = useState({
     name: '', schedule_type: 'once', schedule_time: '09:00', call_delay_seconds: 3,
-    system_prompt: '',
+    system_prompt: '', target_market: '',
   })
   const [contacts, setContacts] = useState([])
   const [loading, setLoading] = useState(false)
@@ -249,6 +268,17 @@ function CreateCampaignModal({ onClose }) {
             <div className="form-group">
               <label className="label">Delay Between Calls (seconds)</label>
               <input className="input" type="number" min={1} value={form.call_delay_seconds} onChange={(e) => setForm({...form, call_delay_seconds: e.target.value})} />
+            </div>
+            <div className="form-group">
+              <label className="label">Target Market (Caller ID & Routing Override)</label>
+              <select className="select" value={form.target_market} onChange={(e) => setForm({...form, target_market: e.target.value})}>
+                <option value="">Default Trunk</option>
+                <option value="US">USA Market (+1)</option>
+                <option value="GB">UK Market (+44)</option>
+                <option value="CA">Canada Market (+1)</option>
+                <option value="AU">Australia Market (+61)</option>
+                <option value="AE">UAE/Dubai Market (+971)</option>
+              </select>
             </div>
             <div className="form-group">
               <label className="label">Custom System Prompt (optional)</label>

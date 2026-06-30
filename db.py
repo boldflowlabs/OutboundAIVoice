@@ -14,16 +14,23 @@ DEFAULTS = {
     "LIVEKIT_API_SECRET":      os.getenv("LIVEKIT_API_SECRET", ""),
     "OPENAI_API_KEY":          os.getenv("OPENAI_API_KEY", ""),
     "OPENAI_MODEL":            os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-    "SARVAM_API_KEY":          os.getenv("SARVAM_API_KEY", ""),
-    "SARVAM_STT_MODEL":        os.getenv("SARVAM_STT_MODEL", "saaras:v3"),
-    "SARVAM_TTS_MODEL":        os.getenv("SARVAM_TTS_MODEL", "bulbul:v3"),
-    "SARVAM_TTS_SPEAKER":      os.getenv("SARVAM_TTS_SPEAKER", "anushka"),
-    "SARVAM_LANGUAGE":         os.getenv("SARVAM_LANGUAGE", "en-IN"),
-    "VOBIZ_SIP_DOMAIN":        os.getenv("VOBIZ_SIP_DOMAIN", ""),
-    "VOBIZ_USERNAME":          os.getenv("VOBIZ_USERNAME", ""),
-    "VOBIZ_PASSWORD":          os.getenv("VOBIZ_PASSWORD", ""),
-    "VOBIZ_OUTBOUND_NUMBER":   os.getenv("VOBIZ_OUTBOUND_NUMBER", ""),
+    "GEMINI_API_KEY":          os.getenv("GEMINI_API_KEY", ""),
+    "GEMINI_VOICE":            os.getenv("GEMINI_VOICE", "Aoede"),
+    "GEMINI_MODEL":            os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp"),
+    "TELNYX_API_KEY":          os.getenv("TELNYX_API_KEY", ""),
+    "TELNYX_CONNECTION_ID":    os.getenv("TELNYX_CONNECTION_ID", ""),
+    "TELNYX_OUTBOUND_VOICE_PROFILE_ID": os.getenv("TELNYX_OUTBOUND_VOICE_PROFILE_ID", ""),
+    "TELNYX_NUMBER_US":        os.getenv("TELNYX_NUMBER_US", ""),
+    "TELNYX_NUMBER_UK":        os.getenv("TELNYX_NUMBER_UK", ""),
+    "TELNYX_NUMBER_CA":        os.getenv("TELNYX_NUMBER_CA", ""),
+    "TELNYX_NUMBER_AU":        os.getenv("TELNYX_NUMBER_AU", ""),
+    "TELNYX_NUMBER_AE":        os.getenv("TELNYX_NUMBER_AE", ""),
     "OUTBOUND_TRUNK_ID":       os.getenv("OUTBOUND_TRUNK_ID", ""),
+    "OUTBOUND_TRUNK_ID_US":    os.getenv("OUTBOUND_TRUNK_ID_US", ""),
+    "OUTBOUND_TRUNK_ID_UK":    os.getenv("OUTBOUND_TRUNK_ID_UK", ""),
+    "OUTBOUND_TRUNK_ID_CA":    os.getenv("OUTBOUND_TRUNK_ID_CA", ""),
+    "OUTBOUND_TRUNK_ID_AU":    os.getenv("OUTBOUND_TRUNK_ID_AU", ""),
+    "OUTBOUND_TRUNK_ID_AE":    os.getenv("OUTBOUND_TRUNK_ID_AE", ""),
     "DEFAULT_TRANSFER_NUMBER": os.getenv("DEFAULT_TRANSFER_NUMBER", ""),
     "SUPABASE_URL":            os.getenv("SUPABASE_URL", ""),
     "SUPABASE_SERVICE_KEY":    os.getenv("SUPABASE_SERVICE_KEY", ""),
@@ -36,7 +43,7 @@ def _default(key: str) -> str:
 
 SENSITIVE_KEYS = {
     "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "OPENAI_API_KEY",
-    "SARVAM_API_KEY", "VOBIZ_PASSWORD", "TWILIO_AUTH_TOKEN",
+    "GEMINI_API_KEY", "TELNYX_API_KEY", "TWILIO_AUTH_TOKEN",
     "SUPABASE_SERVICE_KEY", "S3_SECRET_ACCESS_KEY", "CALCOM_API_KEY",
 }
 
@@ -92,9 +99,11 @@ async def get_all_settings() -> dict:
     KNOWN_KEYS = [
         "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
         "OPENAI_API_KEY", "OPENAI_MODEL",
-        "SARVAM_API_KEY", "SARVAM_STT_MODEL", "SARVAM_TTS_MODEL", "SARVAM_TTS_SPEAKER", "SARVAM_LANGUAGE",
-        "VOBIZ_SIP_DOMAIN", "VOBIZ_USERNAME", "VOBIZ_PASSWORD",
-        "VOBIZ_OUTBOUND_NUMBER", "OUTBOUND_TRUNK_ID", "DEFAULT_TRANSFER_NUMBER",
+        "GEMINI_API_KEY", "GEMINI_VOICE", "GEMINI_MODEL",
+        "TELNYX_API_KEY", "TELNYX_CONNECTION_ID", "TELNYX_OUTBOUND_VOICE_PROFILE_ID",
+        "TELNYX_NUMBER_US", "TELNYX_NUMBER_UK", "TELNYX_NUMBER_CA", "TELNYX_NUMBER_AU", "TELNYX_NUMBER_AE",
+        "OUTBOUND_TRUNK_ID", "OUTBOUND_TRUNK_ID_US", "OUTBOUND_TRUNK_ID_UK", "OUTBOUND_TRUNK_ID_CA", "OUTBOUND_TRUNK_ID_AU", "OUTBOUND_TRUNK_ID_AE",
+        "DEFAULT_TRANSFER_NUMBER",
         "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER",
         "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_ENDPOINT_URL", "S3_REGION", "S3_BUCKET",
         "CALCOM_API_KEY", "CALCOM_EVENT_TYPE_ID", "CALCOM_TIMEZONE",
@@ -359,7 +368,7 @@ async def get_stats() -> dict:
 # ── Campaigns ─────────────────────────────────────────────────────────────────
 
 async def create_campaign(name, contacts_json, schedule_type="once", schedule_time="09:00",
-                           call_delay_seconds=3, system_prompt=None, agent_profile_id=None):
+                           call_delay_seconds=3, system_prompt=None, agent_profile_id=None, target_market=None):
     campaign_id = str(uuid.uuid4())
     db = await _adb()
     row = {
@@ -370,6 +379,7 @@ async def create_campaign(name, contacts_json, schedule_type="once", schedule_ti
     }
     if system_prompt:     row["system_prompt"] = system_prompt
     if agent_profile_id:  row["agent_profile_id"] = agent_profile_id
+    if target_market:     row["target_market"] = target_market
     await db.table("campaigns").insert(row).execute()
     return campaign_id
 

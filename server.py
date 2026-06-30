@@ -124,12 +124,13 @@ class CallRequest(BaseModel):
     service_type: str = "our service"
     system_prompt: Optional[str] = None
     agent_profile_id: Optional[str] = None
+    target_market: Optional[str] = None
 
 
 class AgentProfileRequest(BaseModel):
     name: str
-    voice: str = "kavya"
-    model: str = "gpt-4o-mini"
+    voice: str = "Aoede"
+    model: str = "gemini-2.0-flash-exp"
     system_prompt: Optional[str] = None
     enabled_tools: str = "[]"
     is_default: bool = False
@@ -155,6 +156,7 @@ class CampaignRequest(BaseModel):
     call_delay_seconds: int = 3
     system_prompt: Optional[str] = None
     agent_profile_id: Optional[str] = None
+    target_market: Optional[str] = None
 
 
 class StatusRequest(BaseModel):
@@ -200,6 +202,8 @@ async def api_dispatch_call(req: CallRequest):
     if not effective_prompt:
         effective_prompt = await get_setting("system_prompt", "") or None
 
+    sip_trunk_id = await get_trunk_for_market(req.target_market)
+
     room_name = f"call-{phone.replace('+', '')}-{random.randint(1000, 9999)}"
     metadata: dict = {
         "phone_number": phone,
@@ -208,6 +212,7 @@ async def api_dispatch_call(req: CallRequest):
         "service_type": req.service_type,
         "system_prompt": effective_prompt,
     }
+    if sip_trunk_id:     metadata["sip_trunk_id"] = sip_trunk_id
     if effective_voice:  metadata["voice_override"] = effective_voice
     if effective_model:  metadata["model_override"] = effective_model
     if effective_tools:  metadata["tools_override"] = effective_tools
@@ -309,41 +314,15 @@ async def api_save_settings(req: SettingsRequest):
 
 @app.post("/api/setup/trunk")
 async def api_setup_trunk():
-    url        = await eff("LIVEKIT_URL")
-    key        = await eff("LIVEKIT_API_KEY")
-    secret     = await eff("LIVEKIT_API_SECRET")
-    sip_domain = await eff("VOBIZ_SIP_DOMAIN")
-    username   = await eff("VOBIZ_USERNAME")
-    password   = await eff("VOBIZ_PASSWORD")
-    phone      = await eff("VOBIZ_OUTBOUND_NUMBER")
-
-    if not all([url, key, secret, sip_domain, username, password, phone]):
-        raise HTTPException(400, "Configure LiveKit and Vobiz credentials in Settings first.")
-
     try:
-        from livekit import api as lk_api
-        ssl_ctx = _lk_ssl_ctx()
-        session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx))
-        lk = lk_api.LiveKitAPI(url=url, api_key=key, api_secret=secret, session=session)
-        trunk = await lk.sip.create_sip_outbound_trunk(
-            lk_api.CreateSIPOutboundTrunkRequest(
-                trunk=lk_api.SIPOutboundTrunkInfo(
-                    name="Vobiz Outbound Trunk",
-                    address=sip_domain,
-                    auth_username=username,
-                    auth_password=password,
-                    numbers=[phone],
-                )
-            )
-        )
-        trunk_id = trunk.sip_trunk_id
-        await set_setting("OUTBOUND_TRUNK_ID", trunk_id)
-        os.environ["OUTBOUND_TRUNK_ID"] = trunk_id
-        await lk.aclose()
-        await session.close()
+        from find_trunk import provision_all
+        success = await provision_all()
+        if not success:
+            raise HTTPException(500, "Provisioning failed. Check server logs.")
+        trunk_id = await get_setting("OUTBOUND_TRUNK_ID", "")
         return {"status": "created", "trunk_id": trunk_id}
     except Exception as exc:
-        raise HTTPException(500, f"Trunk creation failed: {exc}")
+        raise HTTPException(500, f"Trunk provisioning failed: {exc}")
 
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
@@ -433,7 +412,8 @@ async def api_set_default_profile(profile_id: str):
 # ── Campaigns ─────────────────────────────────────────────────────────────────
 
 async def _dispatch_one(lk, lk_api, contact: dict, room_name: str,
-                         prompt: Optional[str], profile: Optional[dict] = None) -> bool:
+                         prompt: Optional[str], profile: Optional[dict] = None,
+                         sip_trunk_id: Optional[str] = None) -> bool:
     try:
         saved_prompt = prompt or (await get_setting("system_prompt", "")) or None
         metadata: dict = {
@@ -443,6 +423,7 @@ async def _dispatch_one(lk, lk_api, contact: dict, room_name: str,
             "service_type": contact.get("service_type", "our service"),
             "system_prompt": saved_prompt,
         }
+        if sip_trunk_id:  metadata["sip_trunk_id"] = sip_trunk_id
         if profile:
             if not metadata["system_prompt"] and profile.get("system_prompt"):
                 metadata["system_prompt"] = profile["system_prompt"]
@@ -470,9 +451,12 @@ async def _run_campaign(campaign_id: str) -> None:
     delay = int(campaign.get("call_delay_seconds") or 3)
     prompt = campaign.get("system_prompt")
     agent_profile_id = campaign.get("agent_profile_id")
+    target_market = campaign.get("target_market")
     profile = None
     if agent_profile_id:
         profile = await get_agent_profile(agent_profile_id)
+
+    sip_trunk_id = await get_trunk_for_market(target_market)
 
     url    = await eff("LIVEKIT_URL")
     key    = await eff("LIVEKIT_API_KEY")
@@ -494,7 +478,7 @@ async def _run_campaign(campaign_id: str) -> None:
                 fail_count += 1
                 continue
             room_name = f"camp-{campaign_id[:8]}-{phone.replace('+','')}-{random.randint(100,999)}"
-            success = await _dispatch_one(lk, lk_api_module, contact, room_name, prompt, profile)
+            success = await _dispatch_one(lk, lk_api_module, contact, room_name, prompt, profile, sip_trunk_id)
             if success:
                 ok_count += 1
             else:
@@ -553,6 +537,7 @@ async def api_create_campaign(req: CampaignRequest):
         schedule_type=req.schedule_type, schedule_time=req.schedule_time,
         call_delay_seconds=req.call_delay_seconds, system_prompt=req.system_prompt,
         agent_profile_id=req.agent_profile_id,
+        target_market=req.target_market,
     )
     campaign = await get_campaign(campaign_id)
 

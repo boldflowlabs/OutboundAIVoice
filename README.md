@@ -1,17 +1,16 @@
-# OutboundAIVoice 📞
+# BoldFlow Labs — AI Voice Agent (Outbound) 📞
+> A production-ready, white-labeled voice agent platform that automates outbound calling campaigns with lowest-latency real-time voice, CRM, and appointment scheduling.
 
-A production-ready voice agent capable of making outbound calls using **LiveKit**, **Sarvam AI** (for STT/TTS), and **OpenAI** (for LLM).
-This platform includes a built-in FastAPI dashboard, CRM capabilities, campaign scheduling, and SIP integration.
+---
 
 ## 🚀 Features
 
-- **Voice AI Pipeline**: Powered by **OpenAI** (`gpt-4o-mini`) for intelligent conversational logic and **Sarvam AI** (`saaras:v3` and `bulbul:v3`) for high-quality, regionally optimized Speech-to-Text and Text-to-Speech (e.g., `en-IN`).
-- **SIP Trunking**: Built-in integration with **Vobiz** for reliable PSTN connectivity.
-- **FastAPI Dashboard**: Web UI to manage calls, view logs, create campaigns, and update system settings.
-- **Database Backend**: Uses **Supabase** for persisting settings, call logs, CRM contacts, agent profiles, and appointments.
-- **Campaign Management**: Schedule automated outbound call campaigns (run once, daily, or on weekdays) using `APScheduler`.
-- **Agent Profiles**: Create multiple customizable AI personas with different voices, prompts, and tools.
-- **Call Recording**: Automatic call recording egress to AWS S3-compatible storage.
+- **Gemini Live Multimodal Voice**: Powered by Google's native-audio `RealtimeModel` (default `gemini-2.0-flash-exp`) for ultra-low latency, natural conversational flows, and automatic STT/TTS in a single session.
+- **Telnyx SIP Telephony**: Complete integration with Telnyx API v2 for provisioning outbound FQDN connections, Credential connections, and managing Outbound Voice Profiles (OVPs) with spend limits.
+- **Per-Market Routing**: Map campaigns to separate phone numbers and Telnyx regional AnchorSites (US, UK, Canada, Australia, UAE/Dubai) to match the caller ID and optimize media latency.
+- **FastAPI Dashboard**: Modern React-based CRM and campaign manager for scheduling calls, managing templates, and viewing logs.
+- **S3 Recording & Call Logs**: Persists structured call metrics to Supabase and uploads high-fidelity call audio recordings to S3-compatible storage.
+- **Interactive Tool Calling**: Enables the agent to query database calendars (Cal.com), schedule bookings, check slot availability, and send SMS confirmations (Twilio) mid-call.
 
 ---
 
@@ -19,60 +18,92 @@ This platform includes a built-in FastAPI dashboard, CRM capabilities, campaign 
 
 ### 1. Prerequisites
 - Python 3.11+
-- A [LiveKit Cloud](https://cloud.livekit.io/) account
-- An [OpenAI](https://openai.com/) API Key
-- A [Sarvam AI](https://sarvam.ai/) API Key
-- A [Supabase](https://supabase.com/) Project (URL and Service Role Key)
-- SIP Provider Credentials (e.g., Vobiz)
+- A [LiveKit Cloud](https://cloud.livekit.io/) or self-hosted instance
+- A [Google AI Studio](https://aistudio.google.com/) Gemini API Key
+- A [Telnyx Developer Account](https://developers.telnyx.com/) with an API Key
+- A [Supabase Project](https://supabase.com/)
 
 ### 2. Database Initialization
-Before running the app, you need to set up the database tables in Supabase:
-1. Open your Supabase project dashboard.
-2. Navigate to the **SQL Editor**.
-3. Copy the contents of `supabase_schema.sql` from this repository and run it to create all necessary tables and policies.
+1. In your Supabase Dashboard, open the **SQL Editor**.
+2. Copy and execute the contents of `supabase_schema.sql` to initialize the database tables (RLS disabled by default on service role tables, clients isolation configured for React anonymized anon calls).
 
-### 3. Configure Environment
-Create an environment file:
+### 3. Environment Configuration
+Copy `.env.example` to `.env` and fill in the required credentials:
 ```bash
 cp .env.example .env
-nano .env  # Or open in your editor
 ```
-**Key Variables:**
-- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
+Key variables to populate:
+- `GEMINI_API_KEY`: Google Gemini API Studio key.
+- `TELNYX_API_KEY`: Telnyx v2 API Key.
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
-- `OPENAI_API_KEY`
-- `SARVAM_API_KEY`
-*(Note: Most settings can also be configured dynamically via the web dashboard).*
+- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
 
-### 4. Running Locally
+### 4. Running the Provisioning Script
+Provisioning Telnyx FQDN/Credential connections, Outbound Voice Profiles, and LiveKit SIP Trunks is fully automated! Run the script:
 ```bash
-# Create a virtual environment
-python3 -m venv venv
+python find_trunk.py
+```
+This script will:
+- Create `"BoldFlow Outbound Voice Profile"` in Telnyx.
+- Set up target market SIP connections anchored locally (e.g. London, UK; Sydney, Australia; Chicago, US).
+- Register the outbound trunks on LiveKit under the numbers configured in your environment.
+- Save all trunk IDs into Supabase settings table automatically.
+
+*(Alternatively, click **"Provision Telnyx Trunks"** inside the Settings page of the dashboard).*
+
+### 5. Running Locally
+```bash
+# Set up virtual environment
+python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# Install dependencies
+# Install requirements
 pip install -r requirements.txt
 
-# Start the application (FastAPI server + LiveKit worker)
+# Start FastAPI and the LiveKit worker agent
 ./start.sh
-```
-The dashboard will be available at `http://localhost:80` (or `http://0.0.0.0:80`).
-
-### 5. Running with Docker
-A `Dockerfile` is included for easy containerized deployment.
-```bash
-docker build -t outbound-ai .
-docker run -p 80:80 --env-file .env outbound-ai
 ```
 
 ---
 
-## 📂 Project Structure
+## 🐋 Running with Docker
 
-- `agent.py`: LiveKit worker logic (the AI voice agent session).
-- `server.py`: FastAPI backend handling API routes, UI, and campaign scheduling.
-- `db.py`: Supabase database connection and CRUD operations.
-- `tools.py`: Function-calling tools for the AI agent (e.g., appointment booking).
-- `prompts.py`: Logic for generating dynamic system prompts.
-- `ui/`: Contains the frontend `index.html` for the dashboard.
-- `start.sh`: Entry point script that runs the server and agent simultaneously.
+Use the included Docker files to run backend and frontend simultaneously:
+```bash
+docker-compose up --build
+```
+This spins up:
+- **Backend (FastAPI + Agent Worker)**: Port `8000`
+- **Frontend (Vite Dashboard SPA)**: Port `3000`
+
+---
+
+## 📋 Manual Testing & Validation Checklist
+
+Before hand-off or production deployment, verify all components using this checklist:
+
+### [ ] 1. Place a Live Outbound Call
+- Go to the **Campaigns** tab in the dashboard.
+- Enter your phone number in E.164 format (e.g., `+15555550100`) in the "Single Call" card.
+- Click **Call Now**.
+- Ensure the phone rings, connects, and the agent greets you immediately using the Gemini Live voice.
+
+### [ ] 2. Verify Tool Execution Mid-Call
+- Answer the outbound call.
+- Ask the agent: *"Can you check what slots you have available tomorrow?"* or *"Book me in for a service next Monday at 10 AM."*
+- Verify that the agent correctly triggers `check_availability` and `book_appointment` tools (visible in terminal logs or Settings → Logs).
+
+### [ ] 3. Scheduled Campaign Run (APScheduler)
+- Create a new campaign and import a CSV list of test contacts.
+- Set the campaign to run daily or weekdays.
+- Verify that the scheduler fires at the set time and dispatches calls to target trunks.
+- Click **Run Now** on the campaign to verify manual execution.
+
+### [ ] 4. Call Recording Egress
+- Verify that the call audio recording is created.
+- Check your S3 bucket (or Supabase bucket) inside the `/recordings/` folder for the `.ogg` file.
+- Verify that the call history page in the dashboard includes an active "🎧 Listen" playback link.
+
+### [ ] 5. Supabase Log Persistence
+- Verify that `call_logs` has a record of the call outcome (e.g. `booked`, `not_interested`).
+- Verify that agent decisions and logs are posted to `error_logs` / settings database fields.

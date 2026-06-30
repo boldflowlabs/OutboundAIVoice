@@ -1,5 +1,7 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ClientGuard } from './components/layout/AuthGuard'
+import { BRAND_CONFIG } from './brandConfig'
 
 // Pages
 import Login from './pages/Login'
@@ -12,6 +14,9 @@ import AgentProfiles from './pages/client/AgentProfiles'
 import Settings from './pages/client/Settings'
 
 export default function App() {
+  useEffect(() => {
+    document.title = BRAND_CONFIG.longName
+  }, [])
   return (
     <BrowserRouter>
       <Routes>

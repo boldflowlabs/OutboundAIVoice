@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { BRAND_CONFIG } from '../../brandConfig'
 import {
   LayoutDashboard, Megaphone, Users, Phone, UserCog,
   Settings, LogOut, ChevronRight,
@@ -31,10 +32,10 @@ export default function Sidebar() {
     <aside className="sidebar">
       {/* Brand */}
       <div className="sidebar-brand">
-        <div className="sidebar-logo">B</div>
+        <div className="sidebar-logo">{BRAND_CONFIG.logoText}</div>
         <div>
-          <div className="sidebar-brand-name">BoldFlow AI</div>
-          <div className="sidebar-brand-sub">Voice Platform</div>
+          <div className="sidebar-brand-name">{BRAND_CONFIG.name}</div>
+          <div className="sidebar-brand-sub">{BRAND_CONFIG.description}</div>
         </div>
       </div>
 

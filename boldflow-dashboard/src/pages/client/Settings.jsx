@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import Sidebar from '../../components/layout/Sidebar'
-import { getSettings, saveSettings } from '../../lib/api'
-import { Save } from 'lucide-react'
+import { getSettings, saveSettings, setupTrunk } from '../../lib/api'
+import { Save, RefreshCw } from 'lucide-react'
 
 const SECTIONS = [
   {
@@ -15,19 +15,46 @@ const SECTIONS = [
     },
   },
   {
-    title: 'SIP / Vobiz',
-    keys: ['VOBIZ_SIP_DOMAIN', 'VOBIZ_USERNAME', 'VOBIZ_PASSWORD', 'VOBIZ_OUTBOUND_NUMBER', 'OUTBOUND_TRUNK_ID'],
+    title: 'Telnyx Telephony',
+    keys: ['TELNYX_API_KEY', 'TELNYX_CONNECTION_ID', 'TELNYX_OUTBOUND_VOICE_PROFILE_ID', 'OUTBOUND_TRUNK_ID'],
     descriptions: {
-      VOBIZ_OUTBOUND_NUMBER: 'E.164 format: +918880001234',
-      OUTBOUND_TRUNK_ID: 'Auto-filled after trunk setup',
+      TELNYX_API_KEY: 'Telnyx API key (v2)',
+      TELNYX_CONNECTION_ID: 'Associated Credential/IP connection ID',
+      TELNYX_OUTBOUND_VOICE_PROFILE_ID: 'OVP ID with whitelisted markets and spending limit',
+      OUTBOUND_TRUNK_ID: 'LiveKit SIP trunk ID (default fallback)',
     },
   },
   {
-    title: 'AI / LLM',
-    keys: ['OPENAI_API_KEY', 'OPENAI_MODEL', 'SARVAM_API_KEY', 'SARVAM_STT_MODEL', 'SARVAM_TTS_MODEL', 'SARVAM_TTS_SPEAKER'],
+    title: 'Google Gemini Live / AI',
+    keys: ['GEMINI_API_KEY', 'GEMINI_VOICE', 'GEMINI_MODEL', 'OPENAI_API_KEY', 'OPENAI_MODEL'],
     descriptions: {
+      GEMINI_API_KEY: 'Google Studio API Key (or GOOGLE_API_KEY)',
+      GEMINI_VOICE: 'Voice name for RealtimeModel (Aoede, Puck, Charon, Kore, Fenrir, Leda, Orus, Zephyr)',
+      GEMINI_MODEL: 'Default: gemini-2.0-flash-exp (or gemini-2.5-flash)',
+      OPENAI_API_KEY: 'OpenAI API key (used for memory compression)',
       OPENAI_MODEL: 'Default: gpt-4o-mini',
-      SARVAM_TTS_SPEAKER: 'Default: anushka',
+    },
+  },
+  {
+    title: 'Target Market Numbers & Trunks',
+    keys: [
+      'TELNYX_NUMBER_US', 'OUTBOUND_TRUNK_ID_US',
+      'TELNYX_NUMBER_UK', 'OUTBOUND_TRUNK_ID_UK',
+      'TELNYX_NUMBER_CA', 'OUTBOUND_TRUNK_ID_CA',
+      'TELNYX_NUMBER_AU', 'OUTBOUND_TRUNK_ID_AU',
+      'TELNYX_NUMBER_AE', 'OUTBOUND_TRUNK_ID_AE'
+    ],
+    descriptions: {
+      TELNYX_NUMBER_US: 'US Caller ID (strict E.164)',
+      TELNYX_NUMBER_UK: 'UK Caller ID (strict E.164)',
+      TELNYX_NUMBER_CA: 'Canada Caller ID (strict E.164)',
+      TELNYX_NUMBER_AU: 'Australia Caller ID (strict E.164)',
+      TELNYX_NUMBER_AE: 'UAE/Dubai Caller ID (strict E.164)',
+      OUTBOUND_TRUNK_ID_US: 'LiveKit US SIP Outbound Trunk ID',
+      OUTBOUND_TRUNK_ID_UK: 'LiveKit UK SIP Outbound Trunk ID',
+      OUTBOUND_TRUNK_ID_CA: 'LiveKit Canada SIP Outbound Trunk ID',
+      OUTBOUND_TRUNK_ID_AU: 'LiveKit Australia SIP Outbound Trunk ID',
+      OUTBOUND_TRUNK_ID_AE: 'LiveKit UAE SIP Outbound Trunk ID',
     },
   },
   {
@@ -37,17 +64,33 @@ const SECTIONS = [
   },
 ]
 
-const SENSITIVE = ['LIVEKIT_API_SECRET', 'VOBIZ_PASSWORD', 'OPENAI_API_KEY', 'SARVAM_API_KEY', 'S3_SECRET_ACCESS_KEY']
+const SENSITIVE = ['LIVEKIT_API_SECRET', 'TELNYX_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'S3_SECRET_ACCESS_KEY']
 
 export default function Settings() {
-  const { data: current = {} } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const { data: current = {}, refetch } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const [edits, setEdits] = useState({})
   const [saved, setSaved] = useState(false)
+  const [provisioning, setProvisioning] = useState(false)
+  const [provisionMsg, setProvisionMsg] = useState('')
 
   const mut = useMutation({
     mutationFn: () => saveSettings(edits),
-    onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2500) },
+    onSuccess: () => { setSaved(true); setTimeout(() => setSaved(false), 2500); refetch(); setEdits({}); },
   })
+
+  const handleProvision = async () => {
+    setProvisioning(true)
+    setProvisionMsg('')
+    try {
+      const res = await setupTrunk()
+      setProvisionMsg(`✅ Telephony provisioning successful! Main Trunk ID: ${res.trunk_id}`)
+      refetch()
+    } catch (err) {
+      setProvisionMsg(`❌ Provisioning failed: ${err.message}`)
+    } finally {
+      setProvisioning(false)
+    }
+  }
 
   const merged = { ...current, ...edits }
 
@@ -60,11 +103,31 @@ export default function Settings() {
             <h1>Settings</h1>
             <p className="page-subtitle">API keys and configuration — saved to Supabase settings table</p>
           </div>
-          <button className="btn btn-primary" onClick={() => mut.mutate()} disabled={Object.keys(edits).length === 0 || mut.isPending}>
-            {mut.isPending ? <span className="spinner" style={{ width: 16, height: 16 }} /> : <><Save size={14} /> Save</>}
-            {saved && ' ✓'}
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-ghost" onClick={handleProvision} disabled={provisioning} style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {provisioning ? <span className="spinner" style={{ width: 14, height: 14 }} /> : <RefreshCw size={14} />}
+              Provision Telnyx Trunks
+            </button>
+            <button className="btn btn-primary" onClick={() => mut.mutate()} disabled={Object.keys(edits).length === 0 || mut.isPending}>
+              {mut.isPending ? <span className="spinner" style={{ width: 16, height: 16 }} /> : <><Save size={14} /> Save</>}
+              {saved && ' ✓'}
+            </button>
+          </div>
         </div>
+
+        {provisionMsg && (
+          <div style={{
+            background: provisionMsg.startsWith('✅') ? 'rgba(16,185,129,.1)' : 'rgba(239,68,68,.1)',
+            border: `1px solid ${provisionMsg.startsWith('✅') ? 'rgba(16,185,129,.2)' : 'rgba(239,68,68,.25)'}`,
+            borderRadius: 'var(--radius-sm)',
+            padding: '12px 16px',
+            marginBottom: 20,
+            fontSize: 14,
+            color: provisionMsg.startsWith('✅') ? 'var(--green)' : 'var(--red)',
+          }}>
+            {provisionMsg}
+          </div>
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {SECTIONS.map((sec) => (

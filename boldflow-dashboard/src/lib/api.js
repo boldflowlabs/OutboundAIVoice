@@ -58,6 +58,7 @@ export const getContactCalls = (phone) =>
 // ── Settings ───────────────────────────────────────────────────────
 export const getSettings = () => req('GET', '/api/settings')
 export const saveSettings = (settings) => req('POST', '/api/settings', { settings })
+export const setupTrunk = () => req('POST', '/api/setup/trunk')
 
 // ── Prompt ─────────────────────────────────────────────────────────
 export const getPrompt = () => req('GET', '/api/prompt')

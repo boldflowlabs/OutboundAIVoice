@@ -31,7 +31,7 @@ class AppointmentTools(llm.ToolContext):
         self.phone_number = phone_number
         self.lead_name = lead_name
         self._call_start_time = time.time()
-        self._sip_domain = os.getenv("VOBIZ_SIP_DOMAIN", "")
+        self._sip_domain = "sip.telnyx.com"
         self.recording_url: Optional[str] = None
         super().__init__(tools=[])
 
@@ -61,6 +61,9 @@ class AppointmentTools(llm.ToolContext):
     async def book_appointment(self, name: str, phone: str, date: str, time: str, service: str) -> str:
         """Book appointment after lead confirms. name, phone (+CC), date YYYY-MM-DD, time HH:MM, service."""
         try:
+            phone = phone.strip()
+            if not phone.startswith("+"):
+                phone = "+" + phone
             booking_id = await insert_appointment(name, phone, date, time, service)
             return f"Confirmed! Booking ID: {booking_id}. See you on {date} at {time} for {service}."
         except Exception:
@@ -90,7 +93,9 @@ class AppointmentTools(llm.ToolContext):
         if not destination:
             return "Transfer unavailable: no fallback number configured."
         if "@" not in destination:
-            clean = destination.replace("tel:", "").replace("sip:", "")
+            clean = destination.replace("tel:", "").replace("sip:", "").strip()
+            if not clean.startswith("+"):
+                clean = "+" + clean
             destination = f"sip:{clean}@{self._sip_domain}" if self._sip_domain else f"tel:{clean}"
         elif not destination.startswith("sip:"):
             destination = f"sip:{destination}"
@@ -121,6 +126,9 @@ class AppointmentTools(llm.ToolContext):
         if not (sid and token and from_num):
             return "SMS skipped: Twilio not configured."
         try:
+            phone = phone.strip()
+            if not phone.startswith("+"):
+                phone = "+" + phone
             from twilio.rest import Client
             loop = asyncio.get_running_loop()
             client = Client(sid, token)

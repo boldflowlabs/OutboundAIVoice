@@ -102,8 +102,8 @@ export default function AgentProfiles() {
 function ProfileModal({ initial, onClose, onSaved }) {
   const [form, setForm] = useState({
     name: initial?.name || '',
-    voice: initial?.voice || 'anushka',
-    model: initial?.model || 'gpt-4o-mini',
+    voice: initial?.voice || 'Aoede',
+    model: initial?.model || 'gemini-2.0-flash-exp',
     system_prompt: initial?.system_prompt || '',
     is_default: initial?.is_default ? true : false,
   })
@@ -142,7 +142,7 @@ function ProfileModal({ initial, onClose, onSaved }) {
             <div className="form-group">
               <label className="label">Voice</label>
               <select className="select" value={form.voice} onChange={(e) => setForm({...form, voice: e.target.value})}>
-                {['anushka','meera','arjun','kavya','shreya','manisha'].map(v => (
+                {['Aoede', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Zephyr'].map(v => (
                   <option key={v} value={v}>{v}</option>
                 ))}
               </select>
@@ -150,9 +150,10 @@ function ProfileModal({ initial, onClose, onSaved }) {
             <div className="form-group">
               <label className="label">Model</label>
               <select className="select" value={form.model} onChange={(e) => setForm({...form, model: e.target.value})}>
-                <option value="gpt-4o-mini">gpt-4o-mini (fast)</option>
-                <option value="gpt-4o">gpt-4o (best)</option>
-                <option value="gpt-4-turbo">gpt-4-turbo</option>
+                <option value="gemini-2.0-flash-exp">gemini-2.0-flash-exp (default)</option>
+                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                <option value="gemini-2.5-flash-native-audio-preview-12-2025">gemini-2.5-flash-native-audio</option>
+                <option value="gemini-3.1-flash-live-preview">gemini-3.1-flash-live-preview</option>
               </select>
             </div>
           </div>
